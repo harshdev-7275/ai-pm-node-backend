@@ -1,9 +1,9 @@
-import { drizzle } from 'drizzle-orm/postgres-js'
-import postgres from 'postgres'
+import { drizzle } from 'drizzle-orm/neon-http'
+import { neon } from '@neondatabase/serverless'
 import * as schema from './schema.js'
-import { dotENV } from '../config/dotEnv.js'
+import { env } from '@/config/env.js'
 
+const sql = neon(env.DATABASE_URL)
+export const db = drizzle(sql, { schema })
 
-const client = postgres(dotENV.DIRECT_DATABASE_URL!)
-export const db = drizzle(client, { schema })
-export type DB = typeof db
+export type DrizzleDb = typeof db

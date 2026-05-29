@@ -1,15 +1,13 @@
 import type { Config } from 'drizzle-kit'
-import {dotENV} from "./src/config/dotEnv"
-
-
-console.log(dotENV.DATABASE_URL);
+import './src/config/dotEnv'
+import { env } from './src/config/env'
 
 export default {
   schema: './src/db/schema.ts',
   out: './src/db/migrations',
   dialect: 'postgresql',
   dbCredentials: {
-    url: dotENV.DIRECT_DATABASE_URL!
+    url: env.DIRECT_DATABASE_URL
   }
 } satisfies Config
 

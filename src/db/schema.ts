@@ -133,7 +133,7 @@ export const organizations = pgTable('organizations', {
   isActive: boolean('is_active').default(true).notNull(),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 
   /**
    * Soft delete timestamp.
@@ -198,7 +198,7 @@ export const users = pgTable('users', {
   lastActiveAt: timestamp('last_active_at', { withTimezone: true }),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 
   /** Soft delete — null means account is active */
   deletedAt: timestamp('deleted_at', { withTimezone: true })
@@ -250,7 +250,7 @@ export const userAuth = pgTable('user_auth', {
   tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
 
   createdAt:    timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt:    timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 
@@ -472,7 +472,7 @@ export const projects = pgTable('projects', {
   createdBy: uuid('created_by').notNull().references(() => users.id),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 
   /** Soft delete — null means project is active */
   deletedAt: timestamp('deleted_at', { withTimezone: true })
@@ -553,7 +553,7 @@ export const issueStatuses = pgTable('issue_statuses', {
   isDefault: boolean('is_default').default(false).notNull(),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 
@@ -689,7 +689,7 @@ export const issues = pgTable('issues', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 
   /** Soft delete — null means issue is active and visible */
   deletedAt: timestamp('deleted_at', { withTimezone: true })
@@ -731,7 +731,7 @@ export const issueComments = pgTable('issue_comments', {
   parentId: uuid('parent_id'),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 
   /**
    * Soft delete — when a comment is deleted, body should also be
@@ -997,7 +997,7 @@ export const customFieldValues = pgTable('custom_field_values', {
    */
   value: varchar('value', { length: 2000 }),
 
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 
@@ -1043,7 +1043,7 @@ export const userExpertise = pgTable('user_expertise', {
   score:     integer('score').default(0).notNull(),
 
   /** When this score was last recalculated */
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 
@@ -1280,7 +1280,7 @@ export const teamsConfigs = pgTable('teams_configs', {
   isActive:     boolean('is_active').default(true).notNull(),
 
   createdAt:    timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt:    timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 
@@ -1386,7 +1386,7 @@ export const standupSessions = pgTable('standup_sessions', {
   isActive:       boolean('is_active').default(true).notNull(),
 
   createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt:      timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:      timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 
