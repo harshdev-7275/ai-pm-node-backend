@@ -6,6 +6,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    setupFiles: ['src/test/setup.ts'],
+    testTimeout: 15000,
     coverage: {
       provider: 'v8',
       thresholds: { lines: 80, functions: 80, branches: 70 },
