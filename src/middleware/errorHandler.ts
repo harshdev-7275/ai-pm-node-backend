@@ -1,5 +1,5 @@
 import { ZodError, z } from 'zod'
-import { AppError } from '@/utils/errors.js'
+import { AppError } from '../utils/errors.js'
 
 interface ErrorContext {
   logError: (obj: object, msg: string) => void

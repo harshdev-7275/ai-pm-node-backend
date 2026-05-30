@@ -4,9 +4,9 @@ import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import jwt from '@fastify/jwt'
 import cookie from '@fastify/cookie'
-import { env } from '@/config/env.js'
-import { handleError } from '@/middleware/errorHandler.js'
-import { authRoutes } from '@/modules/auth/auth.routes.js'
+import { env } from './config/env.js'
+import { handleError } from './middleware/errorHandler.js'
+import { authRoutes } from './modules/auth/auth.routes.js'
 
 export async function buildApp() {
   const app = Fastify({
