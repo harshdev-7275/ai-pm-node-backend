@@ -9,6 +9,7 @@ const EnvSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('15m'),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default('30d'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  API_URL: z.string().default('https://api.example.com'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 })
 
