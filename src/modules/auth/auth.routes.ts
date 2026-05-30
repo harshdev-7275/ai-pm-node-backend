@@ -14,12 +14,13 @@ const REFRESH_COOKIE_OPTIONS = {
 const userResponseSchema = {
   type: 'object' as const,
   properties: {
-    id: { type: 'string' },
-    name: { type: 'string' },
-    email: { type: 'string' },
-    jobTitle: { type: 'string', nullable: true },
+    id:        { type: 'string' },
+    name:      { type: 'string' },
+    email:     { type: 'string' },
+    avatarUrl: { type: 'string', nullable: true },
+    jobTitle:  { type: 'string', nullable: true },
+    timezone:  { type: 'string' },
     createdAt: { type: 'string', format: 'date-time' },
-    updatedAt: { type: 'string', format: 'date-time' },
   },
 }
 
@@ -46,9 +47,9 @@ const loginRequestSchema = {
 const authResponseSchema = {
   type: 'object' as const,
   properties: {
-    user: userResponseSchema,
+    user:        userResponseSchema,
     accessToken: { type: 'string' },
-    expiresIn: { type: 'string' },
+    expiresIn:   { type: 'number' },
   },
 }
 
@@ -56,7 +57,7 @@ const refreshResponseSchema = {
   type: 'object' as const,
   properties: {
     accessToken: { type: 'string' },
-    expiresIn: { type: 'string' },
+    expiresIn:   { type: 'number' },
   },
 }
 

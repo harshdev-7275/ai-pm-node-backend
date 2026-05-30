@@ -24,7 +24,8 @@ export async function buildApp() {
   })
 
   await app.register(helmet)
-  await app.register(cors, { origin: env.CORS_ORIGIN, credentials: true })
+  const allowedOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  await app.register(cors, { origin: allowedOrigins, credentials: true })
   await app.register(jwt, { secret: env.JWT_SECRET })
   await app.register(cookie, { secret: env.JWT_SECRET })
 

@@ -31,6 +31,7 @@ export interface AuthResponse {
     avatarUrl: string | null
     jobTitle:  string | null
     timezone:  string
+    createdAt: string
   }
   tokens: AuthTokens
 }

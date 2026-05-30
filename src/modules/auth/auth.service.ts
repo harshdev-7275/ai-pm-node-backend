@@ -80,6 +80,7 @@ export const register = async (input: RegisterInput): Promise<AuthResponse> => {
       avatarUrl: newUser.avatarUrl ?? null,
       jobTitle:  newUser.jobTitle ?? null,
       timezone:  newUser.timezone,
+      createdAt: newUser.createdAt.toISOString(),
     },
     tokens,
   }
@@ -137,6 +138,7 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
       avatarUrl: user.avatarUrl ?? null,
       jobTitle:  user.jobTitle ?? null,
       timezone:  user.timezone,
+      createdAt: user.createdAt.toISOString(),
     },
     tokens,
   }
