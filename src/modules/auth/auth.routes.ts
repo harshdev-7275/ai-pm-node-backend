@@ -73,6 +73,7 @@ export const authRoutes = async (app: FastifyInstance) => {
 
   // POST /auth/register
   app.post('/auth/register', {
+    validatorCompiler: () => () => true, // AJV skipped — Zod safeParse in handler owns validation
     schema: {
       summary: 'Register a new user',
       description: 'Creates a new user account with email and password',
@@ -121,6 +122,7 @@ export const authRoutes = async (app: FastifyInstance) => {
 
   // POST /auth/login
   app.post('/auth/login', {
+    validatorCompiler: () => () => true, // AJV skipped — Zod safeParse in handler owns validation
     schema: {
       summary: 'Login user',
       description: 'Authenticates user with email and password, returns access token',

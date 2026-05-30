@@ -9,6 +9,8 @@ import swaggerUI from '@fastify/swagger-ui'
 import { env } from './config/env.js'
 import { handleError } from './middleware/errorHandler.js'
 import { authRoutes } from './modules/auth/auth.routes.js'
+import { orgsRoutes } from './modules/orgs/orgs.routes.js'
+import { projectsRoutes } from './modules/projects/projects.routes.js'
 
 export async function buildApp() {
   const app = Fastify({
@@ -78,6 +80,8 @@ export async function buildApp() {
   })
 
   await app.register(authRoutes)
+  await app.register(orgsRoutes, { prefix: '/orgs' })
+  await app.register(projectsRoutes, { prefix: '/orgs/:slug/projects' })
 
   app.get('/health', {
     schema: {
