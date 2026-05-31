@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { eq, and } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../../db/index.js'
-import { organizations, organizationMembers } from '../../db/schema.js'
+import { organizations, organizationMembers, users } from '../../db/schema.js'
 import {
   createIssueSchema,
   updateIssueSchema,
@@ -82,6 +82,19 @@ const issueDetailSchema = {
     assignee: { ...issueUserSchema, nullable: true },
     reporter: issueUserSchema,
   },
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+async function getActorName(userId: string): Promise<string> {
+  const [user] = await db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+  return user?.name ?? 'Someone'
 }
 
 // =============================================================================
@@ -165,7 +178,8 @@ export const issuesRoutes = async (app: FastifyInstance) => {
         req.org.id,
         req.user.userId,
       )
-      broadcast(projectId, { type: 'ISSUE_CREATED', issue, actorId: req.user.userId })
+      const actorName = await getActorName(req.user.userId)
+      broadcast(projectId, { type: 'ISSUE_CREATED', issue, actorId: req.user.userId, actorName })
       return reply.status(201).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'PROJECT_NOT_FOUND') {
@@ -275,11 +289,13 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     try {
       const { projectId } = req.params as { slug: string; projectId: string; issueId: string }
       const issue = await issuesService.updateIssueStatus(issueId, parsed.data)
+      const actorName = await getActorName(req.user.userId)
       broadcast(projectId, {
-        type:     'ISSUE_STATUS_UPDATED',
-        issueId:  issue.id,
-        statusId: issue.statusId,
-        actorId:  req.user.userId,
+        type:      'ISSUE_STATUS_UPDATED',
+        issueId:   issue.id,
+        statusId:  issue.statusId,
+        actorId:   req.user.userId,
+        actorName,
       })
       return reply.status(200).send(issue)
     } catch (err: unknown) {
