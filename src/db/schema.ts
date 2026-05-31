@@ -57,6 +57,8 @@ export const issueTypeEnum = pgEnum('issue_type', ['epic', 'story', 'task', 'bug
  */
 export const issuePriorityEnum = pgEnum('issue_priority', ['critical', 'high', 'medium', 'low'])
 
+export const sprintStatusEnum = pgEnum('sprint_status', ['planned', 'active', 'completed'])
+
 /**
  * Type of relationship between two issues.
  * Used in the issue_links table.
@@ -507,6 +509,27 @@ export const projectMembers = pgTable('project_members', {
   addedBy: uuid('added_by').notNull().references(() => users.id),
 
   addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+
+/**
+ * sprints
+ * A time-boxed iteration (usually 1-4 weeks) containing a set of issues.
+ * Issues are assigned to a sprint via issues.sprintId.
+ * Only one sprint per project can be 'active' at a time.
+ */
+export const sprints = pgTable('sprints', {
+  id:        uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id),
+  orgId:     uuid('org_id').notNull().references(() => organizations.id),
+  name:      varchar('name', { length: 255 }).notNull(),
+  goal:      varchar('goal', { length: 1000 }),
+  status:    sprintStatusEnum('status').default('planned').notNull(),
+  startDate: timestamp('start_date', { withTimezone: true }),
+  endDate:   timestamp('end_date', { withTimezone: true }),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 

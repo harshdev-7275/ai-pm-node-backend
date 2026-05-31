@@ -15,7 +15,7 @@ pool.on('connect', () => {
   logger.info('DB connected')
 })
 
-pool.on('error', (err) => {
+pool.on('error', (err: Error) => {
   logger.error({ err }, 'DB pool error')
 })
 
