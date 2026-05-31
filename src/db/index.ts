@@ -6,8 +6,8 @@ import { logger } from '../utils/logger.js'
 
 const pool = new Pool({
   connectionString:        env.DATABASE_URL,
-  connectionTimeoutMillis: 10_000, // wait up to 10 s for a connection (covers Neon cold-start wake-up)
-  idleTimeoutMillis:       20_000, // release idle connections after 20 s
+  connectionTimeoutMillis: 30_000, // 30 s covers Neon cold-start wake-up (free tier pauses after 5 min)
+  idleTimeoutMillis:       20_000,
   max:                     10,
 })
 

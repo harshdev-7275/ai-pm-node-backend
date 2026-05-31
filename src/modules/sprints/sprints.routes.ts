@@ -9,7 +9,13 @@ import * as sprintsService from './sprints.service.js'
 
 const errorSchema = {
   type: 'object' as const,
-  properties: { error: { type: 'string' }, message: { type: 'string' } },
+  properties: {
+    ok:      { type: 'boolean' },
+    code:    { type: 'string' },
+    error:   { type: 'string' },
+    message: { type: 'string' },
+    errors:  { type: 'object' },
+  },
 }
 
 const sprintResponseSchema = {
@@ -84,7 +90,6 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
       tags:     ['Sprints'],
       summary:  'Create sprint',
       security: [{ bearerAuth: [] }],
-      body:     createSprintSchema,
       response: {
         201: sprintResponseSchema,
         400: errorSchema,
@@ -124,7 +129,6 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
       tags:     ['Sprints'],
       summary:  'Update sprint',
       security: [{ bearerAuth: [] }],
-      body:     updateSprintSchema,
       response: {
         200: sprintResponseSchema,
         400: errorSchema,
@@ -187,10 +191,6 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
       tags:     ['Sprints'],
       summary:  'Complete sprint',
       security: [{ bearerAuth: [] }],
-      body: {
-        type: 'object' as const,
-        properties: { moveIncomplete: { type: 'boolean' } },
-      },
       response: {
         200: sprintResponseSchema,
         400: errorSchema,
@@ -200,7 +200,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
     },
   }, async (req, reply) => {
     const { projectId, sprintId } = req.params as { projectId: string; sprintId: string }
-    const { moveIncomplete = true } = (req.body ?? {}) as { moveIncomplete?: boolean }
+    const { moveIncomplete = true } = ((req.body as Record<string, unknown>) ?? {}) as { moveIncomplete?: boolean }
     const result = await sprintsService.completeSprint(projectId, sprintId, moveIncomplete)
     return reply.status(200).send(result)
   })
