@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify'
+import { eq, and } from 'drizzle-orm'
 import { z } from 'zod'
+import { db } from '../../db/index.js'
+import { organizations, organizationMembers } from '../../db/schema.js'
 import {
   createIssueSchema,
   updateIssueSchema,
@@ -7,6 +10,8 @@ import {
 } from './issues.schema.js'
 import { requireOrgMember } from '../orgs/orgs.middleware.js'
 import * as issuesService from './issues.service.js'
+import { addClient, removeClient, broadcast } from './issues.sse.js'
+import { env } from '../../config/env.js'
 
 // =============================================================================
 // RESPONSE SCHEMAS
@@ -160,6 +165,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
         req.org.id,
         req.user.userId,
       )
+      broadcast(projectId, { type: 'ISSUE_CREATED', issue, actorId: req.user.userId })
       return reply.status(201).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'PROJECT_NOT_FOUND') {
@@ -267,7 +273,14 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
+      const { projectId } = req.params as { slug: string; projectId: string; issueId: string }
       const issue = await issuesService.updateIssueStatus(issueId, parsed.data)
+      broadcast(projectId, {
+        type:     'ISSUE_STATUS_UPDATED',
+        issueId:  issue.id,
+        statusId: issue.statusId,
+        actorId:  req.user.userId,
+      })
       return reply.status(200).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'ISSUE_NOT_FOUND') {
@@ -275,6 +288,76 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       }
       throw err
     }
+  })
+
+
+  // GET /issues/events — SSE stream for real-time board updates
+  // Auth via ?token= query param because EventSource cannot set headers
+  app.get('/events', async (req, reply) => {
+    const { token } = req.query as { token?: string }
+    if (!token) return reply.status(401).send({ error: 'UNAUTHORIZED', message: 'Token required' })
+
+    let payload: { userId: string; email: string; sessionId: string }
+    try {
+      payload = app.jwt.verify<{ userId: string; email: string; sessionId: string }>(token)
+    } catch {
+      return reply.status(401).send({ error: 'UNAUTHORIZED', message: 'Invalid token' })
+    }
+
+    // Inline org membership check — cannot use requireOrgMember because it
+    // calls req.jwtVerify() which reads Authorization header, absent on SSE requests
+    const { slug, projectId } = req.params as { slug: string; projectId: string }
+
+    const [org] = await db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+      .limit(1)
+
+    if (!org) return reply.status(404).send({ error: 'ORG_NOT_FOUND', message: 'Organization not found' })
+
+    const [membership] = await db
+      .select({ id: organizationMembers.id })
+      .from(organizationMembers)
+      .where(and(
+        eq(organizationMembers.orgId, org.id),
+        eq(organizationMembers.userId, payload.userId),
+        eq(organizationMembers.isActive, true),
+      ))
+      .limit(1)
+
+    if (!membership) return reply.status(403).send({ error: 'FORBIDDEN', message: 'Not a member of this organization' })
+
+    // SSE headers — CORS must be set manually because reply.raw bypasses @fastify/cors
+    const requestOrigin  = req.headers.origin ?? ''
+    const allowedOrigins = env.CORS_ORIGIN.split(',').map((o: string) => o.trim())
+    const corsOrigin     = allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0] ?? '*'
+
+    reply.raw.setHeader('Access-Control-Allow-Origin',      corsOrigin)
+    reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+    reply.raw.setHeader('Content-Type',      'text/event-stream')
+    reply.raw.setHeader('Cache-Control',     'no-cache')
+    reply.raw.setHeader('Connection',        'keep-alive')
+    reply.raw.setHeader('X-Accel-Buffering', 'no')
+    reply.raw.flushHeaders()
+
+    // Send initial connected event
+    reply.raw.write(`data: ${JSON.stringify({ type: 'CONNECTED' })}\n\n`)
+
+    addClient(projectId, reply.raw)
+
+    // Heartbeat every 25s keeps the connection alive through proxies/load balancers
+    const heartbeat = setInterval(() => {
+      try { reply.raw.write(': ping\n\n') } catch { clearInterval(heartbeat) }
+    }, 25_000)
+
+    req.raw.on('close', () => {
+      clearInterval(heartbeat)
+      removeClient(projectId, reply.raw)
+    })
+
+    // Keep the handler open — Fastify will not auto-close the response
+    await new Promise<void>(() => {})
   })
 
 
