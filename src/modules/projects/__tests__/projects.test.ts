@@ -369,4 +369,60 @@ describe('Projects API', () => {
       expect(res.body.message).toBe('Member removed from project')
     })
   })
+
+  // ===========================================================================
+  describe('GET /orgs/:slug/projects — member visibility filter', () => {
+    // At this point in the test run the member has been removed from projectId,
+    // so they are not in any project.
+
+    let filteredProjectId: string
+
+    it('org member sees no projects when not added to any', async () => {
+      const res = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${memberToken}`)
+
+      expect(res.status).toBe(200)
+      expect(Array.isArray(res.body)).toBe(true)
+      expect(res.body).toHaveLength(0)
+    })
+
+    it('org member only sees projects they are explicitly added to', async () => {
+      // Create a project the member is not yet part of
+      const createRes = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ name: 'Filter Test Project', key: `FLT${ts.toString().slice(-4)}` })
+      filteredProjectId = createRes.body.id
+
+      // Member cannot see it yet
+      const beforeRes = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${memberToken}`)
+      expect(beforeRes.body.some((p: { id: string }) => p.id === filteredProjectId)).toBe(false)
+
+      // Add member to that project
+      await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${filteredProjectId}/members`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ userId: memberUserId, role: 'member' })
+
+      // Member now sees it but NOT the projects they are not in
+      const afterRes = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${memberToken}`)
+      expect(afterRes.body.some((p: { id: string }) => p.id === filteredProjectId)).toBe(true)
+      expect(afterRes.body.some((p: { id: string }) => p.id === projectId)).toBe(false)
+    })
+
+    it('org owner still sees all active projects regardless of project membership', async () => {
+      const res = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+
+      expect(res.status).toBe(200)
+      expect(res.body.some((p: { id: string }) => p.id === projectId)).toBe(true)
+      expect(res.body.some((p: { id: string }) => p.id === filteredProjectId)).toBe(true)
+    })
+  })
 })

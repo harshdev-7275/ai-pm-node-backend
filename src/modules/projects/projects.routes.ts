@@ -143,7 +143,11 @@ export const projectsRoutes = async (app: FastifyInstance) => {
       },
     },
   }, async (req, reply) => {
-    const list = await projectsService.getOrgProjects(req.org.id)
+    const list = await projectsService.getOrgProjects(
+      req.org.id,
+      req.user.userId,
+      req.membership.role,
+    )
     return reply.status(200).send(list)
   })
 

@@ -105,16 +105,40 @@ export const getProjectDetail = async (
 // GET ORG PROJECTS
 // =============================================================================
 
-export const getOrgProjects = async (orgId: string): Promise<ProjectResponse[]> => {
+export const getOrgProjects = async (
+  orgId:    string,
+  userId:   string,
+  userRole: string,
+): Promise<ProjectResponse[]> => {
+  // Owners and admins see every active project in the org
+  if (userRole === 'owner' || userRole === 'admin') {
+    const rows = await db
+      .select()
+      .from(projects)
+      .where(and(
+        eq(projects.orgId, orgId),
+        eq(projects.isArchived, false),
+      ))
+    return rows.map(toResponse)
+  }
+
+  // Members and viewers only see projects they have been explicitly added to
   const rows = await db
-    .select()
+    .select({ project: projects })
     .from(projects)
+    .innerJoin(
+      projectMembers,
+      and(
+        eq(projectMembers.projectId, projects.id),
+        eq(projectMembers.userId, userId),
+      ),
+    )
     .where(and(
       eq(projects.orgId, orgId),
       eq(projects.isArchived, false),
     ))
 
-  return rows.map(toResponse)
+  return rows.map(r => toResponse(r.project))
 }
 
 // =============================================================================
