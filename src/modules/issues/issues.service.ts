@@ -1,12 +1,13 @@
-import { and, eq, isNull, asc } from 'drizzle-orm'
+import { and, eq, isNull, asc, desc } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { issues, projects, issueStatuses, users } from '../../db/schema.js'
+import { issues, projects, issueStatuses, users, issueHistory } from '../../db/schema.js'
 import type {
   CreateIssueInput,
   UpdateIssueInput,
   UpdateIssueStatusInput,
   IssueResponse,
   IssueDetail,
+  IssueHistoryEntry,
 } from './issues.types.js'
 
 // =============================================================================
@@ -135,10 +136,37 @@ export const getIssueById = async (issueId: string): Promise<IssueDetail> => {
 // UPDATE ISSUE
 // =============================================================================
 
+// Maps UpdateIssueInput keys → DB column names (for history recording)
+const HISTORY_FIELD_MAP: Record<
+  string,
+  { dbCol: string; getCurrent: (i: typeof issues.$inferSelect) => string | null }
+> = {
+  title:          { dbCol: 'title',           getCurrent: (i) => i.title },
+  description:    { dbCol: 'description',     getCurrent: (i) => i.description ?? null },
+  type:           { dbCol: 'type',            getCurrent: (i) => i.type },
+  statusId:       { dbCol: 'status_id',       getCurrent: (i) => i.statusId },
+  priority:       { dbCol: 'priority',        getCurrent: (i) => i.priority },
+  assigneeId:     { dbCol: 'assignee_id',     getCurrent: (i) => i.assigneeId ?? null },
+  parentId:       { dbCol: 'parent_id',       getCurrent: (i) => i.parentId ?? null },
+  storyPoints:    { dbCol: 'story_points',    getCurrent: (i) => i.storyPoints !== null ? String(i.storyPoints) : null },
+  estimatedHours: { dbCol: 'estimated_hours', getCurrent: (i) => i.estimatedHours !== null ? String(i.estimatedHours) : null },
+  actualHours:    { dbCol: 'actual_hours',    getCurrent: (i) => i.actualHours !== null ? String(i.actualHours) : null },
+  dueDate:        { dbCol: 'due_date',        getCurrent: (i) => i.dueDate?.toISOString() ?? null },
+}
+
 export const updateIssue = async (
-  issueId: string,
-  input:   UpdateIssueInput,
+  issueId:   string,
+  input:     UpdateIssueInput,
+  changedBy: string,
 ): Promise<IssueResponse> => {
+  const [current] = await db
+    .select()
+    .from(issues)
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+    .limit(1)
+
+  if (!current) throw new Error('ISSUE_NOT_FOUND')
+
   const [issue] = await db
     .update(issues)
     .set({
@@ -161,6 +189,25 @@ export const updateIssue = async (
     .returning()
 
   if (!issue) throw new Error('ISSUE_NOT_FOUND')
+
+  // Write one history row per changed field
+  const historyRows = Object.entries(HISTORY_FIELD_MAP)
+    .filter(([key]) => key in input)
+    .map(([key, { dbCol, getCurrent }]) => {
+      const rawNew = input[key as keyof UpdateIssueInput]
+      return {
+        issueId,
+        changedBy,
+        fieldChanged: dbCol,
+        oldValue:     getCurrent(current),
+        newValue:     rawNew === null || rawNew === undefined ? null : String(rawNew),
+      }
+    })
+
+  if (historyRows.length > 0) {
+    await db.insert(issueHistory).values(historyRows)
+  }
+
   return toResponse(issue)
 }
 
@@ -169,9 +216,18 @@ export const updateIssue = async (
 // =============================================================================
 
 export const updateIssueStatus = async (
-  issueId: string,
-  input:   UpdateIssueStatusInput,
+  issueId:   string,
+  input:     UpdateIssueStatusInput,
+  changedBy: string,
 ): Promise<IssueResponse> => {
+  const [current] = await db
+    .select({ statusId: issues.statusId })
+    .from(issues)
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+    .limit(1)
+
+  if (!current) throw new Error('ISSUE_NOT_FOUND')
+
   const [issue] = await db
     .update(issues)
     .set({ statusId: input.statusId })
@@ -182,6 +238,15 @@ export const updateIssueStatus = async (
     .returning()
 
   if (!issue) throw new Error('ISSUE_NOT_FOUND')
+
+  await db.insert(issueHistory).values({
+    issueId,
+    changedBy,
+    fieldChanged: 'status_id',
+    oldValue:     current.statusId,
+    newValue:     input.statusId,
+  })
+
   return toResponse(issue)
 }
 
@@ -212,6 +277,36 @@ export const getIssueStatuses = async (projectId: string) => {
     .from(issueStatuses)
     .where(eq(issueStatuses.projectId, projectId))
     .orderBy(asc(issueStatuses.position))
+}
+
+// =============================================================================
+// GET ISSUE HISTORY
+// =============================================================================
+
+export const getIssueHistory = async (issueId: string): Promise<IssueHistoryEntry[]> => {
+  const rows = await db
+    .select({
+      history: issueHistory,
+      changer: users,
+    })
+    .from(issueHistory)
+    .innerJoin(users, eq(issueHistory.changedBy, users.id))
+    .where(eq(issueHistory.issueId, issueId))
+    .orderBy(desc(issueHistory.changedAt))
+
+  return rows.map((row) => ({
+    id:           row.history.id,
+    issueId:      row.history.issueId,
+    fieldChanged: row.history.fieldChanged,
+    oldValue:     row.history.oldValue ?? null,
+    newValue:     row.history.newValue ?? null,
+    changedAt:    row.history.changedAt.toISOString(),
+    changedBy: {
+      id:        row.changer.id,
+      name:      row.changer.name,
+      avatarUrl: row.changer.avatarUrl ?? null,
+    },
+  }))
 }
 
 // =============================================================================

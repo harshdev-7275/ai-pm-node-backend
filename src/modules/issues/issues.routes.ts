@@ -247,7 +247,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
-      const issue = await issuesService.updateIssue(issueId, parsed.data)
+      const issue = await issuesService.updateIssue(issueId, parsed.data, req.user.userId)
       return reply.status(200).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'ISSUE_NOT_FOUND') {
@@ -288,7 +288,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
     try {
       const { projectId } = req.params as { slug: string; projectId: string; issueId: string }
-      const issue = await issuesService.updateIssueStatus(issueId, parsed.data)
+      const issue = await issuesService.updateIssueStatus(issueId, parsed.data, req.user.userId)
       const actorName = await getActorName(req.user.userId)
       broadcast(projectId, {
         type:      'ISSUE_STATUS_UPDATED',
@@ -374,6 +374,47 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
     // Keep the handler open — Fastify will not auto-close the response
     await new Promise<void>(() => {})
+  })
+
+
+  // GET /issues/:issueId/history — full audit trail for an issue
+  app.get('/:issueId/history', {
+    preHandler: [requireOrgMember],
+    schema: {
+      summary:     'Get issue history',
+      description: 'Returns the complete audit trail for an issue, newest changes first',
+      tags:        ['Issues'],
+      security:    [{ bearerAuth: [] }],
+      response: {
+        200: {
+          type: 'array' as const,
+          items: {
+            type: 'object' as const,
+            properties: {
+              id:           { type: 'string' },
+              issueId:      { type: 'string' },
+              fieldChanged: { type: 'string' },
+              oldValue:     { type: 'string', nullable: true },
+              newValue:     { type: 'string', nullable: true },
+              changedAt:    { type: 'string', format: 'date-time' },
+              changedBy: {
+                type: 'object' as const,
+                properties: {
+                  id:        { type: 'string' },
+                  name:      { type: 'string' },
+                  avatarUrl: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        404: errorSchema,
+      },
+    },
+  }, async (req, reply) => {
+    const { issueId } = req.params as { slug: string; projectId: string; issueId: string }
+    const history = await issuesService.getIssueHistory(issueId)
+    return reply.status(200).send(history)
   })
 
 

@@ -38,6 +38,22 @@ export const issueParamsSchema = z.object({
   issueId: z.uuid('Invalid issue ID'),
 })
 
+export const createCommentSchema = z.object({
+  body:     z.string().min(1, 'Comment body is required').max(10000),
+  parentId: z.uuid('Invalid parent comment ID').optional(),
+})
+
+export const updateCommentSchema = z.object({
+  body: z.string().min(1, 'Comment body is required').max(10000),
+})
+
+export const commentParamsSchema = z.object({
+  issueId:   z.uuid('Invalid issue ID'),
+  commentId: z.uuid('Invalid comment ID'),
+})
+
 export type CreateIssueInput       = z.infer<typeof createIssueSchema>
 export type UpdateIssueInput       = z.infer<typeof updateIssueSchema>
 export type UpdateIssueStatusInput = z.infer<typeof updateIssueStatusSchema>
+export type CreateCommentInput     = z.infer<typeof createCommentSchema>
+export type UpdateCommentInput     = z.infer<typeof updateCommentSchema>
