@@ -57,3 +57,23 @@ export type UpdateIssueInput       = z.infer<typeof updateIssueSchema>
 export type UpdateIssueStatusInput = z.infer<typeof updateIssueStatusSchema>
 export type CreateCommentInput     = z.infer<typeof createCommentSchema>
 export type UpdateCommentInput     = z.infer<typeof updateCommentSchema>
+
+// =============================================================================
+// STATUS MANAGEMENT SCHEMAS
+// =============================================================================
+
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a valid hex color e.g. #3b82f6')
+
+export const createStatusSchema = z.object({
+  name:  z.string().min(1, 'Name is required').max(100),
+  color: hexColor,
+})
+
+export const updateStatusSchema = z.object({
+  name:     z.string().min(1).max(100).optional(),
+  color:    hexColor.optional(),
+  position: z.number().int().positive().optional(),
+})
+
+export type CreateStatusInput = z.infer<typeof createStatusSchema>
+export type UpdateStatusInput = z.infer<typeof updateStatusSchema>

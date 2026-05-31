@@ -1,7 +1,15 @@
 import type { z } from 'zod'
 import type { issueParamsSchema, commentParamsSchema } from './issues.schema.js'
 
-export type { CreateIssueInput, UpdateIssueInput, UpdateIssueStatusInput, CreateCommentInput, UpdateCommentInput } from './issues.schema.js'
+export type {
+  CreateIssueInput,
+  UpdateIssueInput,
+  UpdateIssueStatusInput,
+  CreateCommentInput,
+  UpdateCommentInput,
+  CreateStatusInput,
+  UpdateStatusInput,
+} from './issues.schema.js'
 
 export type IssueParams   = z.infer<typeof issueParamsSchema>
 export type CommentParams = z.infer<typeof commentParamsSchema>
@@ -63,6 +71,17 @@ export interface CommentResponse {
   isEdited:  boolean
   parentId:  string | null
   author:    CommentAuthor
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StatusResponse {
+  id:        string
+  projectId: string
+  name:      string
+  color:     string
+  position:  number
+  isDefault: boolean
   createdAt: string
   updatedAt: string
 }
