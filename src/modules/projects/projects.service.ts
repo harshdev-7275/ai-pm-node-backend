@@ -142,6 +142,21 @@ export const getOrgProjects = async (
 }
 
 // =============================================================================
+// BOT — LIST ALL PROJECTS (no auth filtering)
+// =============================================================================
+
+export const getAllProjectsByOrg = async (orgId: string): Promise<ProjectResponse[]> => {
+  const rows = await db
+    .select()
+    .from(projects)
+    .where(and(
+      eq(projects.orgId, orgId),
+      eq(projects.isArchived, false),
+    ))
+  return rows.map(toResponse)
+}
+
+// =============================================================================
 // GET PROJECT MEMBERS
 // =============================================================================
 

@@ -6,6 +6,7 @@ import { botAuth } from '../../middleware/botAuth.js'
 import { getIssuesByProject, getIssueStatuses } from '../issues/issues.service.js'
 import { listSprints, addIssueToSprint } from '../sprints/sprints.service.js'
 import { getOrgMembers } from '../orgs/orgs.service.js'
+import { getAllProjectsByOrg, getProjectMembers } from '../projects/projects.service.js'
 
 // =============================================================================
 // BOT ROUTES — read-only, protected by X-Bot-Secret
@@ -14,6 +15,44 @@ import { getOrgMembers } from '../orgs/orgs.service.js'
 // =============================================================================
 
 export const botRoutes = async (app: FastifyInstance) => {
+
+  // GET /bot/orgs/:slug/projects
+  app.get('/orgs/:slug/projects', {
+    preHandler: [botAuth],
+    schema: {
+      summary:  'Bot — list all projects in org',
+      tags:     ['Bot'],
+      security: [{ botSecret: [] }],
+    },
+  }, async (req, reply) => {
+    const { slug } = req.params as { slug: string }
+    const [org] = await db
+      .select()
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+      .limit(1)
+    if (!org) {
+      return reply.status(404).send({ error: 'ORG_NOT_FOUND', message: 'Organization not found' })
+    }
+    const projectList = await getAllProjectsByOrg(org.id)
+    return reply.status(200).send(projectList)
+  })
+
+
+  // GET /bot/orgs/:slug/projects/:projectId/members
+  app.get('/orgs/:slug/projects/:projectId/members', {
+    preHandler: [botAuth],
+    schema: {
+      summary:  'Bot — list project members',
+      tags:     ['Bot'],
+      security: [{ botSecret: [] }],
+    },
+  }, async (req, reply) => {
+    const { projectId } = req.params as { slug: string; projectId: string }
+    const members = await getProjectMembers(projectId)
+    return reply.status(200).send(members)
+  })
+
 
   // GET /bot/orgs/:slug/projects/:projectId/statuses
   app.get('/orgs/:slug/projects/:projectId/statuses', {
