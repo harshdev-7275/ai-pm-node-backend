@@ -4,7 +4,7 @@ import { organizations } from '../../db/schema.js'
 import { eq } from 'drizzle-orm'
 import { botAuth } from '../../middleware/botAuth.js'
 import { getIssuesByProject, getIssueStatuses } from '../issues/issues.service.js'
-import { listSprints } from '../sprints/sprints.service.js'
+import { listSprints, addIssueToSprint } from '../sprints/sprints.service.js'
 import { getOrgMembers } from '../orgs/orgs.service.js'
 
 // =============================================================================
@@ -57,6 +57,21 @@ export const botRoutes = async (app: FastifyInstance) => {
     const { projectId } = req.params as { slug: string; projectId: string }
     const sprints = await listSprints(projectId)
     return reply.status(200).send(sprints)
+  })
+
+
+  // POST /bot/orgs/:slug/projects/:projectId/sprints/:sprintId/issues/:issueId
+  app.post('/orgs/:slug/projects/:projectId/sprints/:sprintId/issues/:issueId', {
+    preHandler: [botAuth],
+    schema: {
+      summary:  'Bot — add issue to sprint',
+      tags:     ['Bot'],
+      security: [{ botSecret: [] }],
+    },
+  }, async (req, reply) => {
+    const { projectId, sprintId, issueId } = req.params as { slug: string; projectId: string; sprintId: string; issueId: string }
+    await addIssueToSprint(projectId, sprintId, issueId)
+    return reply.status(204).send()
   })
 
 
