@@ -60,6 +60,15 @@ export const issuePriorityEnum = pgEnum('issue_priority', ['critical', 'high', '
 export const sprintStatusEnum = pgEnum('sprint_status', ['planned', 'active', 'completed'])
 
 /**
+ * How often a project auto-creates the next sprint when the current one completes.
+ * - none:      manual sprint creation only (default)
+ * - weekly:    new sprint every 7 days
+ * - biweekly:  new sprint every 14 days
+ * - monthly:   new sprint every 30 days
+ */
+export const cadenceTypeEnum = pgEnum('cadence_type', ['none', 'weekly', 'biweekly', 'monthly'])
+
+/**
  * Type of relationship between two issues.
  * Used in the issue_links table.
  * - blocks:        this issue must be resolved before the target
@@ -472,6 +481,43 @@ export const projects = pgTable('projects', {
 
   /** The user who created this project */
   createdBy: uuid('created_by').notNull().references(() => users.id),
+
+  // ---------------------------------------------------------------------------
+  // SPRINT CADENCE — controls auto-creation of the next sprint on completion
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Whether and how often the project auto-creates the next sprint.
+   * 'none' = manual only. Set to weekly/biweekly/monthly to enable recurring.
+   */
+  cadenceType: cadenceTypeEnum('cadence_type').default('none').notNull(),
+
+  /**
+   * Day of the week sprints start on (0 = Sunday … 6 = Saturday).
+   * Used to calculate the next sprint's start date.
+   * null when cadenceType is 'none'.
+   */
+  cadenceStartDay: integer('cadence_start_day'),
+
+  /**
+   * Duration of each auto-created sprint in days (7, 14, or 30).
+   * null when cadenceType is 'none'.
+   */
+  cadenceDuration: integer('cadence_duration'),
+
+  /**
+   * When true, completing a sprint automatically creates the next one
+   * according to the cadence settings above.
+   */
+  cadenceAutoCreate: boolean('cadence_auto_create').default(false).notNull(),
+
+  /**
+   * Naming pattern for auto-created sprints.
+   * Supported tokens: {n} = sprint number, {date} = start date (YYYY-MM-DD)
+   * e.g. "Sprint {n}", "Week of {date}"
+   * null = defaults to "Sprint {n}"
+   */
+  cadenceNaming: varchar('cadence_naming', { length: 100 }),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),

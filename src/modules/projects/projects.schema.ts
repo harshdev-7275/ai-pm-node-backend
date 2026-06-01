@@ -12,11 +12,16 @@ export const createProjectSchema = z.object({
 })
 
 export const updateProjectSchema = z.object({
-  name:        z.string().min(2).max(255).optional(),
-  description: z.string().max(1000).optional(),
-  icon:        z.string().max(10).optional(),
-  color:       z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Color must be a valid hex code').optional(),
-  isArchived:  z.boolean().optional(),
+  name:               z.string().min(2).max(255).optional(),
+  description:        z.string().max(1000).optional(),
+  icon:               z.string().max(10).optional(),
+  color:              z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Color must be a valid hex code').optional(),
+  isArchived:         z.boolean().optional(),
+  cadenceType:        z.enum(['none', 'weekly', 'biweekly', 'monthly']).optional(),
+  cadenceStartDay:    z.number().int().min(0).max(6).nullable().optional(),
+  cadenceDuration:    z.number().int().positive().nullable().optional(),
+  cadenceAutoCreate:  z.boolean().optional(),
+  cadenceNaming:      z.string().max(100).nullable().optional(),
 })
 
 export const addProjectMemberSchema = z.object({

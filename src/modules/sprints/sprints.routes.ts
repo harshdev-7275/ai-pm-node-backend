@@ -184,7 +184,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(200).send(result)
   })
 
-  // POST /:sprintId/complete — transition active → completed
+  // POST /:sprintId/complete — transition active → completed, optionally auto-creates next sprint
   app.post('/:sprintId/complete', {
     onRequest:  [requireOrgMember],
     schema: {
@@ -192,7 +192,13 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
       summary:  'Complete sprint',
       security: [{ bearerAuth: [] }],
       response: {
-        200: sprintResponseSchema,
+        200: {
+          type: 'object' as const,
+          properties: {
+            completedSprint: sprintResponseSchema,
+            nextSprint:      { ...sprintResponseSchema, nullable: true },
+          },
+        },
         400: errorSchema,
         403: errorSchema,
         404: errorSchema,

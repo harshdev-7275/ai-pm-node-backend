@@ -1,6 +1,6 @@
-import { and, eq, isNull, asc } from 'drizzle-orm'
+import { and, eq, isNull, asc, count } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { sprints, issues } from '../../db/schema.js'
+import { sprints, issues, projects } from '../../db/schema.js'
 import { AppError } from '../../utils/errors.js'
 import type {
   CreateSprintInput,
@@ -8,6 +8,11 @@ import type {
   SprintResponse,
   SprintDetail,
 } from './sprints.types.js'
+
+export interface CompleteSprintResult {
+  completedSprint: SprintResponse
+  nextSprint:      SprintResponse | null
+}
 
 // =============================================================================
 // HELPERS
@@ -211,11 +216,32 @@ export const startSprint = async (projectId: string, sprintId: string): Promise<
 // COMPLETE SPRINT
 // =============================================================================
 
+function formatSprintDate(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+// Returns the next date that falls on targetDay (0=Sun…6=Sat), starting from `from`.
+// If `from` is already that day it returns `from` unchanged (sprint ends on Monday → next starts Monday).
+function nextOccurrenceOfDay(from: Date, targetDay: number): Date {
+  const result = new Date(from)
+  const current = result.getDay()
+  const diff = (targetDay - current + 7) % 7
+  result.setDate(result.getDate() + diff)
+  return result
+}
+
+function buildSprintName(pattern: string | null, n: number, startDate: Date): string {
+  const template = pattern ?? 'Sprint {n}'
+  return template
+    .replace('{n}', String(n))
+    .replace('{date}', formatSprintDate(startDate))
+}
+
 export const completeSprint = async (
-  projectId:       string,
-  sprintId:        string,
-  moveIncomplete:  boolean = true,
-): Promise<SprintResponse> => {
+  projectId:      string,
+  sprintId:       string,
+  moveIncomplete: boolean = true,
+): Promise<CompleteSprintResult> => {
   const [existing] = await db
     .select()
     .from(sprints)
@@ -226,7 +252,6 @@ export const completeSprint = async (
   if (existing.status !== 'active') throw new AppError('SPRINT_NOT_ACTIVE', 'Only an active sprint can be completed', 400)
 
   if (moveIncomplete) {
-    // Move all open issues in this sprint back to the backlog
     await db
       .update(issues)
       .set({ sprintId: null })
@@ -241,7 +266,63 @@ export const completeSprint = async (
 
   if (!updated) throw new AppError('SPRINT_COMPLETE_FAILED', 'Failed to complete sprint', 500)
 
-  return toSprintResponse(updated)
+  const completedSprint = toSprintResponse(updated)
+
+  // Check if the project has cadence auto-create enabled
+  const [project] = await db
+    .select({
+      cadenceAutoCreate: projects.cadenceAutoCreate,
+      cadenceType:       projects.cadenceType,
+      cadenceStartDay:   projects.cadenceStartDay,
+      cadenceDuration:   projects.cadenceDuration,
+      cadenceNaming:     projects.cadenceNaming,
+      orgId:             projects.orgId,
+    })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!project?.cadenceAutoCreate || project.cadenceType === 'none') {
+    return { completedSprint, nextSprint: null }
+  }
+
+  // Snap the start date to the configured start day.
+  // e.g. sprint ends Wednesday, cadenceStartDay = 1 (Monday) → next Monday.
+  // If the end date already falls on the right day it stays unchanged.
+  const completedEnd = updated.endDate ?? new Date()
+  const startDate    = project.cadenceStartDay !== null
+    ? nextOccurrenceOfDay(completedEnd, project.cadenceStartDay)
+    : completedEnd
+
+  const duration = project.cadenceDuration ?? 7
+  const endDate  = new Date(startDate)
+  endDate.setDate(endDate.getDate() + duration)
+
+  // Sprint number = total sprints in this project + 1
+  const countResult = await db
+    .select({ sprintCount: count() })
+    .from(sprints)
+    .where(eq(sprints.projectId, projectId))
+
+  const nextNumber = (countResult[0]?.sprintCount ?? 0) + 1
+  const name       = buildSprintName(project.cadenceNaming, nextNumber, startDate)
+
+  const [nextRow] = await db
+    .insert(sprints)
+    .values({
+      projectId,
+      orgId:     project.orgId,
+      name,
+      status:    'planned',
+      startDate,
+      endDate,
+      createdBy: existing.createdBy,
+    })
+    .returning()
+
+  if (!nextRow) throw new AppError('SPRINT_AUTO_CREATE_FAILED', 'Failed to auto-create next sprint', 500)
+
+  return { completedSprint, nextSprint: toSprintResponse(nextRow) }
 }
 
 // =============================================================================

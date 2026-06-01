@@ -17,6 +17,7 @@ export type ErrorCode =
   | 'SPRINT_ALREADY_STARTED'
   | 'ACTIVE_SPRINT_EXISTS'
   | 'ISSUE_NOT_FOUND'
+  | 'SPRINT_AUTO_CREATE_FAILED'
 
 export class AppError extends Error {
   constructor(

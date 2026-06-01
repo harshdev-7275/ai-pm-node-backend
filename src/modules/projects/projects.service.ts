@@ -182,11 +182,16 @@ export const updateProject = async (
   const [project] = await db
     .update(projects)
     .set({
-      ...(input.name        !== undefined && { name: input.name }),
-      ...(input.description !== undefined && { description: input.description }),
-      ...(input.icon        !== undefined && { icon: input.icon }),
-      ...(input.color       !== undefined && { color: input.color }),
-      ...(input.isArchived  !== undefined && { isArchived: input.isArchived }),
+      ...(input.name              !== undefined && { name:              input.name }),
+      ...(input.description       !== undefined && { description:       input.description }),
+      ...(input.icon              !== undefined && { icon:              input.icon }),
+      ...(input.color             !== undefined && { color:             input.color }),
+      ...(input.isArchived        !== undefined && { isArchived:        input.isArchived }),
+      ...(input.cadenceType       !== undefined && { cadenceType:       input.cadenceType }),
+      ...(input.cadenceStartDay   !== undefined && { cadenceStartDay:   input.cadenceStartDay }),
+      ...(input.cadenceDuration   !== undefined && { cadenceDuration:   input.cadenceDuration }),
+      ...(input.cadenceAutoCreate !== undefined && { cadenceAutoCreate: input.cadenceAutoCreate }),
+      ...(input.cadenceNaming     !== undefined && { cadenceNaming:     input.cadenceNaming }),
     })
     .where(eq(projects.id, projectId))
     .returning()
@@ -306,14 +311,19 @@ export const getProjectMemberRole = async (
 // =============================================================================
 
 const toResponse = (p: typeof projects.$inferSelect): ProjectResponse => ({
-  id:          p.id,
-  orgId:       p.orgId,
-  name:        p.name,
-  key:         p.key,
-  description: p.description ?? null,
-  icon:        p.icon ?? null,
-  color:       p.color ?? null,
-  isArchived:  p.isArchived,
-  createdBy:   p.createdBy,
-  createdAt:   p.createdAt.toISOString(),
+  id:                p.id,
+  orgId:             p.orgId,
+  name:              p.name,
+  key:               p.key,
+  description:       p.description ?? null,
+  icon:              p.icon ?? null,
+  color:             p.color ?? null,
+  isArchived:        p.isArchived,
+  createdBy:         p.createdBy,
+  createdAt:         p.createdAt.toISOString(),
+  cadenceType:       p.cadenceType,
+  cadenceStartDay:   p.cadenceStartDay ?? null,
+  cadenceDuration:   p.cadenceDuration ?? null,
+  cadenceAutoCreate: p.cadenceAutoCreate,
+  cadenceNaming:     p.cadenceNaming ?? null,
 })
