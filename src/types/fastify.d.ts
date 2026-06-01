@@ -10,5 +10,7 @@ declare module 'fastify' {
     user:       TokenPayload
     org:        typeof organizations.$inferSelect
     membership: Pick<typeof organizationMembers.$inferSelect, 'id' | 'role'>
+    isBot:      boolean
+    botUserId:  string | undefined
   }
 }

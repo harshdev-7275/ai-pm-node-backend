@@ -8,7 +8,7 @@ import {
   updateIssueSchema,
   updateIssueStatusSchema,
 } from './issues.schema.js'
-import { requireOrgMember } from '../orgs/orgs.middleware.js'
+import { requireOrgMember, requireBotOrMember } from '../orgs/orgs.middleware.js'
 import * as issuesService from './issues.service.js'
 import { addClient, removeClient, broadcast } from './issues.sse.js'
 import { env } from '../../config/env.js'
@@ -145,7 +145,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // POST /issues — create a new issue
   app.post('/', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireBotOrMember],
     schema: {
       summary:     'Create issue',
       description: 'Creates a new issue in the project with an auto-incremented number',
@@ -172,14 +172,15 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
+      const actorId = req.isBot ? (req.botUserId ?? req.org.id) : req.user.userId
       const issue = await issuesService.createIssue(
         parsed.data,
         projectId,
         req.org.id,
-        req.user.userId,
+        actorId,
       )
-      const actorName = await getActorName(req.user.userId)
-      broadcast(projectId, { type: 'ISSUE_CREATED', issue, actorId: req.user.userId, actorName })
+      const actorName = await getActorName(actorId)
+      broadcast(projectId, { type: 'ISSUE_CREATED', issue, actorId, actorName })
       return reply.status(201).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'PROJECT_NOT_FOUND') {
@@ -260,7 +261,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // PATCH /issues/:issueId/status — update status only (board drag-and-drop)
   app.patch('/:issueId/status', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireBotOrMember],
     schema: {
       summary:     'Update issue status',
       description: 'Moves an issue to a different status column — used by board drag-and-drop',
@@ -288,13 +289,14 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
     try {
       const { projectId } = req.params as { slug: string; projectId: string; issueId: string }
-      const issue = await issuesService.updateIssueStatus(issueId, parsed.data, req.user.userId)
-      const actorName = await getActorName(req.user.userId)
+      const actorId = req.isBot ? (req.botUserId ?? req.org.id) : req.user.userId
+      const issue = await issuesService.updateIssueStatus(issueId, parsed.data, actorId)
+      const actorName = await getActorName(actorId)
       broadcast(projectId, {
         type:      'ISSUE_STATUS_UPDATED',
         issueId:   issue.id,
         statusId:  issue.statusId,
-        actorId:   req.user.userId,
+        actorId,
         actorName,
       })
       return reply.status(200).send(issue)

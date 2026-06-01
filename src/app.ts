@@ -15,6 +15,7 @@ import { issuesRoutes } from './modules/issues/issues.routes.js'
 import { commentsRoutes } from './modules/issues/comments.routes.js'
 import { statusesRoutes } from './modules/issues/statuses.routes.js'
 import { sprintsRoutes } from './modules/sprints/sprints.routes.js'
+import { botRoutes } from './modules/bot/bot.routes.js'
 
 export async function buildApp() {
   const app = Fastify({
@@ -94,6 +95,7 @@ export async function buildApp() {
   await app.register(statusesRoutes, { prefix: '/orgs/:slug/projects/:projectId/statuses' })
   await app.register(sprintsRoutes,  { prefix: '/orgs/:slug/projects/:projectId/sprints' })
   await app.register(projectsRoutes, { prefix: '/orgs/:slug/projects' })
+  await app.register(botRoutes,      { prefix: '/bot' })
 
   app.get('/health', {
     schema: {

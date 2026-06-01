@@ -11,6 +11,7 @@ const EnvSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'), // comma-separated for multiple origins
   API_URL: z.string().default('https://api.example.com'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  BOT_SECRET: z.string().min(16, 'BOT_SECRET must be at least 16 characters'),
 })
 
 const parsed = EnvSchema.safeParse(process.env)

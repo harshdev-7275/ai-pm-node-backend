@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
-import { requireOrgMember } from '../orgs/orgs.middleware.js'
+import { requireOrgMember, requireBotOrMember } from '../orgs/orgs.middleware.js'
 import { getProjectMemberRole } from '../projects/projects.service.js'
 import { createStatusSchema, updateStatusSchema } from './issues.schema.js'
 import * as statusesService from './statuses.service.js'
