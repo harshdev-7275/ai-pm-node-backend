@@ -4,6 +4,7 @@ import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import jwt from '@fastify/jwt'
 import cookie from '@fastify/cookie'
+import rateLimit from '@fastify/rate-limit'
 import swagger from '@fastify/swagger'
 import swaggerUI from '@fastify/swagger-ui'
 import { env } from './config/env.js'
@@ -89,7 +90,16 @@ export async function buildApp() {
     })
   })
 
-  await app.register(authRoutes)
+  // Rate limiting scoped to auth routes only (10 req/min per IP on login and signup)
+  await app.register(async (authApp) => {
+    await authApp.register(rateLimit, {
+      max: 10,
+      timeWindow: '1 minute',
+      keyGenerator: (req) => req.ip,
+    })
+    await authApp.register(authRoutes)
+  }, { prefix: '/auth' })
+
   await app.register(orgsRoutes, { prefix: '/orgs' })
   await app.register(issuesRoutes,   { prefix: '/orgs/:slug/projects/:projectId/issues' })
   await app.register(commentsRoutes, { prefix: '/orgs/:slug/projects/:projectId/issues' })

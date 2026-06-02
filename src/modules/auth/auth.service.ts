@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '../../db/index.js'
 import { users, userAuth, refreshTokens } from '../../db/schema.js'
 import { env } from '../../config/env.js'
+import { AppError } from '../../utils/errors.js'
 import type { RegisterInput, LoginInput, AuthTokens, AuthResponse, TokenPayload } from './auth.types.js'
 import crypto from 'crypto'
 
@@ -43,7 +44,7 @@ export const register = async (input: RegisterInput): Promise<AuthResponse> => {
     .limit(1)
 
   if (existing.length > 0) {
-    throw new Error('EMAIL_TAKEN')
+    throw new AppError('EMAIL_TAKEN', 'Email already registered', 409)
   }
 
   // 2. Hash the password
@@ -60,7 +61,7 @@ export const register = async (input: RegisterInput): Promise<AuthResponse> => {
     })
     .returning()
 
-  if (!newUser) throw new Error('REGISTRATION_FAILED')
+  if (!newUser) throw new AppError('REGISTRATION_FAILED', 'Registration failed', 500)
 
   // 4. Create the auth record
   await db.insert(userAuth).values({
@@ -100,7 +101,7 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
     .limit(1)
 
   if (!user) {
-    throw new Error('INVALID_CREDENTIALS')
+    throw new AppError('INVALID_CREDENTIALS', 'Invalid credentials', 401)
   }
 
   // 2. Find their email auth record
@@ -111,14 +112,14 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
     .limit(1)
 
   if (!auth || !auth.passwordHash) {
-    throw new Error('INVALID_CREDENTIALS')
+    throw new AppError('INVALID_CREDENTIALS', 'Invalid credentials', 401)
   }
 
   // 3. Compare password
   const isValid = await bcrypt.compare(input.password, auth.passwordHash)
 
   if (!isValid) {
-    throw new Error('INVALID_CREDENTIALS')
+    throw new AppError('INVALID_CREDENTIALS', 'Invalid credentials', 401)
   }
 
   // 4. Update last active
@@ -167,7 +168,7 @@ export const createSession = async (
     })
     .returning()
 
-  if (!session) throw new Error('SESSION_CREATION_FAILED')
+  if (!session) throw new AppError('SESSION_CREATION_FAILED', 'Session creation failed', 500)
 
   // 3. Generate access token
   const payload: TokenPayload = {
@@ -204,16 +205,16 @@ export const refreshAccessToken = async (
     .limit(1)
 
   if (!session) {
-    throw new Error('INVALID_REFRESH_TOKEN')
+    throw new AppError('INVALID_REFRESH_TOKEN', 'Invalid refresh token', 401)
   }
 
   // 3. Check it's not revoked or expired
   if (session.revokedAt) {
-    throw new Error('REFRESH_TOKEN_REVOKED')
+    throw new AppError('REFRESH_TOKEN_REVOKED', 'Refresh token revoked', 401)
   }
 
   if (session.expiresAt < new Date()) {
-    throw new Error('REFRESH_TOKEN_EXPIRED')
+    throw new AppError('REFRESH_TOKEN_EXPIRED', 'Refresh token expired', 401)
   }
 
   // 4. Get the user
@@ -224,7 +225,7 @@ export const refreshAccessToken = async (
     .limit(1)
 
   if (!user) {
-    throw new Error('USER_NOT_FOUND')
+    throw new AppError('USER_NOT_FOUND', 'User not found', 404)
   }
 
   // 5. Issue new access token
@@ -251,7 +252,7 @@ export const getMe = async (userId: string) => {
     .limit(1)
 
   if (!user) {
-    throw new Error('USER_NOT_FOUND')
+    throw new AppError('USER_NOT_FOUND', 'User not found', 404)
   }
 
   return {

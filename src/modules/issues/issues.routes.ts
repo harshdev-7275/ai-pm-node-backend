@@ -119,7 +119,11 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     },
   }, async (req, reply) => {
     const { projectId } = req.params as { slug: string; projectId: string }
-    const list = await issuesService.getIssuesByProject(projectId)
+    const { limit, offset } = req.query as { limit?: string; offset?: string }
+    const list = await issuesService.getIssuesByProject(projectId, {
+      limit: limit ? parseInt(limit, 10) : 100,
+      offset: offset ? parseInt(offset, 10) : 0,
+    })
     return reply.status(200).send(list)
   })
 

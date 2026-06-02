@@ -68,7 +68,13 @@ export const createIssue = async (
 // GET ISSUES BY PROJECT
 // =============================================================================
 
-export const getIssuesByProject = async (projectId: string): Promise<IssueResponse[]> => {
+export const getIssuesByProject = async (
+  projectId: string,
+  options?: { limit?: number; offset?: number },
+): Promise<IssueResponse[]> => {
+  const limit = options?.limit ?? 100
+  const offset = options?.offset ?? 0
+
   const rows = await db
     .select()
     .from(issues)
@@ -77,6 +83,8 @@ export const getIssuesByProject = async (projectId: string): Promise<IssueRespon
       isNull(issues.deletedAt),
     ))
     .orderBy(asc(issues.number))
+    .limit(limit)
+    .offset(offset)
 
   return rows.map(toResponse)
 }

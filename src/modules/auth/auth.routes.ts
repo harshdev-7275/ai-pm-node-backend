@@ -109,7 +109,7 @@ export const authRoutes = async (app: FastifyInstance) => {
         expiresIn:   result.tokens.expiresIn,
       })
     } catch (err: unknown) {
-      if (err instanceof Error && err.message === 'EMAIL_TAKEN') {
+      if (err instanceof Error && (err as any).code === 'EMAIL_TAKEN') {
         return reply.status(409).send({
           error:   'EMAIL_TAKEN',
           message: 'An account with this email already exists',
@@ -158,7 +158,7 @@ export const authRoutes = async (app: FastifyInstance) => {
         expiresIn:   result.tokens.expiresIn,
       })
     } catch (err: unknown) {
-      if (err instanceof Error && err.message === 'INVALID_CREDENTIALS') {
+      if (err instanceof Error && (err as any).code === 'INVALID_CREDENTIALS') {
         return reply.status(401).send({
           error:   'INVALID_CREDENTIALS',
           message: 'Invalid email or password',
@@ -201,9 +201,9 @@ export const authRoutes = async (app: FastifyInstance) => {
       reply.clearCookie('refresh_token', { path: '/auth/refresh' })
 
       if (err instanceof Error && (
-        err.message === 'INVALID_REFRESH_TOKEN' ||
-        err.message === 'REFRESH_TOKEN_REVOKED' ||
-        err.message === 'REFRESH_TOKEN_EXPIRED'
+        (err as any).code === 'INVALID_REFRESH_TOKEN' ||
+        (err as any).code === 'REFRESH_TOKEN_REVOKED' ||
+        (err as any).code === 'REFRESH_TOKEN_EXPIRED'
       )) {
         return reply.status(401).send({
           error:   err.message,
@@ -234,7 +234,7 @@ export const authRoutes = async (app: FastifyInstance) => {
       const user = await authService.getMe(req.user.userId)
       return reply.status(200).send(user)
     } catch (err: unknown) {
-      if (err instanceof Error && err.message === 'USER_NOT_FOUND') {
+      if (err instanceof Error && (err as any).code === 'USER_NOT_FOUND') {
         return reply.status(404).send({
           error:   'USER_NOT_FOUND',
           message: 'User not found',
