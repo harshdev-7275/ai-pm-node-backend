@@ -91,6 +91,8 @@ export async function buildApp() {
   })
 
   // Rate limiting scoped to auth routes only (10 req/min per IP on login and signup)
+  // Note: authRoutes define routes with /auth/ prefix (e.g. POST /auth/login)
+  // so this plugin is registered without an additional prefix
   await app.register(async (authApp) => {
     await authApp.register(rateLimit, {
       max: 10,
@@ -98,7 +100,7 @@ export async function buildApp() {
       keyGenerator: (req) => req.ip,
     })
     await authApp.register(authRoutes)
-  }, { prefix: '/auth' })
+  })
 
   await app.register(orgsRoutes, { prefix: '/orgs' })
   await app.register(issuesRoutes,   { prefix: '/orgs/:slug/projects/:projectId/issues' })
