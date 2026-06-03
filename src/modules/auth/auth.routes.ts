@@ -2,14 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { registerSchema, loginSchema } from './auth.schema.js'
 import * as authService from './auth.service.js'
-
-const REFRESH_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure:   process.env['NODE_ENV'] === 'production',
-  sameSite: 'lax' as const,
-  maxAge:   30 * 24 * 60 * 60,
-  path:     '/auth/refresh',
-}
+import { refreshCookieOptions, REFRESH_COOKIE_PATH } from './auth.cookies.js'
+import { env } from '../../config/env.js'
 
 const userResponseSchema = {
   type: 'object' as const,
@@ -101,7 +95,7 @@ export const authRoutes = async (app: FastifyInstance) => {
     try {
       const result = await authService.register(parsed.data)
 
-      reply.setCookie('refresh_token', result.tokens.refreshToken, REFRESH_COOKIE_OPTIONS)
+      reply.setCookie('refresh_token', result.tokens.refreshToken, refreshCookieOptions(env.NODE_ENV))
 
       return reply.status(201).send({
         user:        result.user,
@@ -150,7 +144,7 @@ export const authRoutes = async (app: FastifyInstance) => {
     try {
       const result = await authService.login(parsed.data)
 
-      reply.setCookie('refresh_token', result.tokens.refreshToken, REFRESH_COOKIE_OPTIONS)
+      reply.setCookie('refresh_token', result.tokens.refreshToken, refreshCookieOptions(env.NODE_ENV))
 
       return reply.status(200).send({
         user:        result.user,
@@ -198,7 +192,7 @@ export const authRoutes = async (app: FastifyInstance) => {
         expiresIn:   result.expiresIn,
       })
     } catch (err: unknown) {
-      reply.clearCookie('refresh_token', { path: '/auth/refresh' })
+      reply.clearCookie('refresh_token', { path: REFRESH_COOKIE_PATH })
 
       if (err instanceof Error && (
         (err as any).code === 'INVALID_REFRESH_TOKEN' ||
@@ -266,7 +260,7 @@ export const authRoutes = async (app: FastifyInstance) => {
   }, async (req, reply) => {
     await authService.logout(req.user.sessionId)
 
-    reply.clearCookie('refresh_token', { path: '/auth/refresh' })
+    reply.clearCookie('refresh_token', { path: REFRESH_COOKIE_PATH })
 
     return reply.status(200).send({ message: 'Logged out successfully' })
   })
