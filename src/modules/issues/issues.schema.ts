@@ -63,16 +63,19 @@ export type UpdateCommentInput     = z.infer<typeof updateCommentSchema>
 // =============================================================================
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a valid hex color e.g. #3b82f6')
+const statusCategory = z.enum(['todo', 'in_progress', 'done'])
 
 export const createStatusSchema = z.object({
-  name:  z.string().min(1, 'Name is required').max(100),
-  color: hexColor,
+  name:     z.string().min(1, 'Name is required').max(100),
+  color:    hexColor,
+  category: statusCategory.default('todo'),
 })
 
 export const updateStatusSchema = z.object({
   name:     z.string().min(1).max(100).optional(),
   color:    hexColor.optional(),
   position: z.number().int().positive().optional(),
+  category: statusCategory.optional(),
 })
 
 export type CreateStatusInput = z.infer<typeof createStatusSchema>

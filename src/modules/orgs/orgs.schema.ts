@@ -22,6 +22,10 @@ export const updateMemberRoleSchema = z.object({
   }),
 })
 
+export const transferOwnershipSchema = z.object({
+  userId: z.uuid('Invalid user ID'),
+})
+
 export const updateOrgSchema = z.object({
   name:    z.string().min(2).max(255).optional(),
   logoUrl: z.url('Invalid logo URL').max(500).optional(),
@@ -31,6 +35,7 @@ export const orgParamsSchema = z.object({
   orgId: z.uuid('Invalid org ID'),
 })
 
-export type CreateOrgInput       = z.infer<typeof createOrgSchema>
-export type InviteMemberInput    = z.infer<typeof inviteMemberSchema>
+export type CreateOrgInput        = z.infer<typeof createOrgSchema>
+export type InviteMemberInput     = z.infer<typeof inviteMemberSchema>
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>
+export type TransferOwnershipInput = z.infer<typeof transferOwnershipSchema>

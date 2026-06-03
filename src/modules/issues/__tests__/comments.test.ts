@@ -121,6 +121,13 @@ describe('Comments API', () => {
       .set('Authorization', `Bearer ${memberToken}`)
       .send({ token: inviteToken })
 
+    // 6b — Add the member to the project so they pass project-access checks.
+    // They are still NOT the comment author — used by the author-only 403 tests.
+    await supertest(app.server)
+      .post(`/orgs/${orgSlug}/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ userId: memberRes.body.user.id, role: 'member' })
+
     // 7 — Register outsider (never joins the org)
     const outsiderRes = await supertest(app.server)
       .post('/auth/register')

@@ -8,7 +8,7 @@ import {
   updateIssueSchema,
   updateIssueStatusSchema,
 } from './issues.schema.js'
-import { requireOrgMember, requireBotOrMember } from '../orgs/orgs.middleware.js'
+import { requireProjectAccess } from '../../middleware/requireProjectAccess.js'
 import * as issuesService from './issues.service.js'
 import { addClient, removeClient, broadcast } from './issues.sse.js'
 import { env } from '../../config/env.js'
@@ -61,6 +61,7 @@ const statusSchema = {
     name:     { type: 'string' },
     color:    { type: 'string' },
     position: { type: 'number' },
+    category: { type: 'string' },
   },
 }
 
@@ -107,7 +108,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // GET /issues — list all active issues for the project
   app.get('/', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'List issues',
       description: 'Returns all active issues for the project ordered by number',
@@ -130,7 +131,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // GET /issues/statuses — list issue statuses for the project (board columns)
   app.get('/statuses', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Get issue statuses',
       description: 'Returns the workflow statuses (board columns) for this project',
@@ -149,7 +150,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // POST /issues — create a new issue
   app.post('/', {
-    preHandler: [requireBotOrMember],
+    preHandler: [requireProjectAccess('member')],
     schema: {
       summary:     'Create issue',
       description: 'Creates a new issue in the project with an auto-incremented number',
@@ -197,7 +198,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // GET /issues/:issueId — get issue with full detail
   app.get('/:issueId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Get issue',
       description: 'Returns full issue detail including status, assignee and reporter',
@@ -209,10 +210,10 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       },
     },
   }, async (req, reply) => {
-    const { issueId } = req.params as { slug: string; projectId: string; issueId: string }
+    const { projectId, issueId } = req.params as { slug: string; projectId: string; issueId: string }
 
     try {
-      const issue = await issuesService.getIssueById(issueId)
+      const issue = await issuesService.getIssueById(projectId, issueId)
       return reply.status(200).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'ISSUE_NOT_FOUND') {
@@ -225,7 +226,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // PATCH /issues/:issueId — update issue fields
   app.patch('/:issueId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('member')],
     schema: {
       summary:     'Update issue',
       description: 'Updates any field on an issue',
@@ -238,7 +239,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       },
     },
   }, async (req, reply) => {
-    const { issueId } = req.params as { slug: string; projectId: string; issueId: string }
+    const { projectId, issueId } = req.params as { slug: string; projectId: string; issueId: string }
 
     const parsed = updateIssueSchema.safeParse(req.body)
     if (!parsed.success) {
@@ -252,11 +253,14 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
-      const issue = await issuesService.updateIssue(issueId, parsed.data, req.user.userId)
+      const issue = await issuesService.updateIssue(projectId, issueId, parsed.data, req.user.userId)
       return reply.status(200).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'ISSUE_NOT_FOUND') {
         return reply.status(404).send({ error: 'ISSUE_NOT_FOUND', message: 'Issue not found' })
+      }
+      if (err instanceof Error && err.message === 'STATUS_NOT_FOUND') {
+        return reply.status(400).send({ error: 'STATUS_NOT_FOUND', message: 'Status does not belong to this project' })
       }
       throw err
     }
@@ -265,7 +269,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // PATCH /issues/:issueId/status — update status only (board drag-and-drop)
   app.patch('/:issueId/status', {
-    preHandler: [requireBotOrMember],
+    preHandler: [requireProjectAccess('member')],
     schema: {
       summary:     'Update issue status',
       description: 'Moves an issue to a different status column — used by board drag-and-drop',
@@ -278,7 +282,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       },
     },
   }, async (req, reply) => {
-    const { issueId } = req.params as { slug: string; projectId: string; issueId: string }
+    const { projectId, issueId } = req.params as { slug: string; projectId: string; issueId: string }
 
     const parsed = updateIssueStatusSchema.safeParse(req.body)
     if (!parsed.success) {
@@ -292,9 +296,8 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
-      const { projectId } = req.params as { slug: string; projectId: string; issueId: string }
       const actorId = req.isBot ? (req.botUserId ?? req.org.id) : req.user.userId
-      const issue = await issuesService.updateIssueStatus(issueId, parsed.data, actorId)
+      const issue = await issuesService.updateIssueStatus(projectId, issueId, parsed.data, actorId)
       const actorName = await getActorName(actorId)
       broadcast(projectId, {
         type:      'ISSUE_STATUS_UPDATED',
@@ -307,6 +310,9 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'ISSUE_NOT_FOUND') {
         return reply.status(404).send({ error: 'ISSUE_NOT_FOUND', message: 'Issue not found' })
+      }
+      if (err instanceof Error && err.message === 'STATUS_NOT_FOUND') {
+        return reply.status(400).send({ error: 'STATUS_NOT_FOUND', message: 'Status does not belong to this project' })
       }
       throw err
     }
@@ -385,7 +391,7 @@ export const issuesRoutes = async (app: FastifyInstance) => {
 
   // GET /issues/:issueId/history — full audit trail for an issue
   app.get('/:issueId/history', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Get issue history',
       description: 'Returns the complete audit trail for an issue, newest changes first',
@@ -418,15 +424,15 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       },
     },
   }, async (req, reply) => {
-    const { issueId } = req.params as { slug: string; projectId: string; issueId: string }
-    const history = await issuesService.getIssueHistory(issueId)
+    const { projectId, issueId } = req.params as { slug: string; projectId: string; issueId: string }
+    const history = await issuesService.getIssueHistory(projectId, issueId)
     return reply.status(200).send(history)
   })
 
 
   // DELETE /issues/:issueId — soft delete
   app.delete('/:issueId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('member')],
     schema: {
       summary:     'Delete issue',
       description: 'Soft-deletes an issue — it remains in the DB for audit history',
@@ -438,10 +444,10 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       },
     },
   }, async (req, reply) => {
-    const { issueId } = req.params as { slug: string; projectId: string; issueId: string }
+    const { projectId, issueId } = req.params as { slug: string; projectId: string; issueId: string }
 
     try {
-      await issuesService.deleteIssue(issueId)
+      await issuesService.deleteIssue(projectId, issueId)
       return reply.status(200).send({ message: 'Issue deleted' })
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'ISSUE_NOT_FOUND') {

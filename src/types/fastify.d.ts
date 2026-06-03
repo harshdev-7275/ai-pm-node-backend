@@ -1,6 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { TokenPayload } from '../modules/auth/auth.types.js'
-import type { organizations, organizationMembers } from '../db/schema.js'
+import type { organizations, organizationMembers, projectMembers } from '../db/schema.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -12,5 +12,7 @@ declare module 'fastify' {
     membership: Pick<typeof organizationMembers.$inferSelect, 'id' | 'role'>
     isBot:      boolean
     botUserId:  string | undefined
+    /** Effective project access level, set by the requireProjectAccess guard. */
+    projectRole: (typeof projectMembers.$inferSelect)['role']
   }
 }

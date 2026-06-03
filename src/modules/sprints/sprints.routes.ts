@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { createSprintSchema, updateSprintSchema } from './sprints.schema.js'
-import { requireOrgMember } from '../orgs/orgs.middleware.js'
+import { requireProjectAccess } from '../../middleware/requireProjectAccess.js'
 import * as sprintsService from './sprints.service.js'
 
 // =============================================================================
@@ -67,7 +67,7 @@ const sprintDetailSchema = {
 export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
   // GET / — list all sprints for a project
   app.get('/', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('viewer')],
     schema: {
       tags:     ['Sprints'],
       summary:  'List sprints',
@@ -85,7 +85,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // POST / — create a sprint
   app.post('/', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('member')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Create sprint',
@@ -105,7 +105,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // GET /:sprintId — get sprint detail with issues
   app.get('/:sprintId', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('viewer')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Get sprint detail',
@@ -124,7 +124,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // PATCH /:sprintId — update sprint name/goal/dates
   app.patch('/:sprintId', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('member')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Update sprint',
@@ -145,7 +145,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // DELETE /:sprintId — delete sprint (moves issues to backlog)
   app.delete('/:sprintId', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('lead')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Delete sprint',
@@ -165,7 +165,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /:sprintId/start — transition planned → active
   app.post('/:sprintId/start', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('lead')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Start sprint',
@@ -186,7 +186,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /:sprintId/complete — transition active → completed, optionally auto-creates next sprint
   app.post('/:sprintId/complete', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('lead')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Complete sprint',
@@ -213,7 +213,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /:sprintId/issues/:issueId — add issue to sprint
   app.post('/:sprintId/issues/:issueId', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('member')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Add issue to sprint',
@@ -233,7 +233,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
 
   // DELETE /:sprintId/issues/:issueId — remove issue from sprint (back to backlog)
   app.delete('/:sprintId/issues/:issueId', {
-    onRequest:  [requireOrgMember],
+    onRequest:  [requireProjectAccess('member')],
     schema: {
       tags:     ['Sprints'],
       summary:  'Remove issue from sprint',

@@ -1,32 +1,8 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { requireOrgMember, requireBotOrMember } from '../orgs/orgs.middleware.js'
-import { getProjectMemberRole } from '../projects/projects.service.js'
+import { requireProjectAccess } from '../../middleware/requireProjectAccess.js'
 import { createStatusSchema, updateStatusSchema } from './issues.schema.js'
 import * as statusesService from './statuses.service.js'
-
-// =============================================================================
-// ROLE GUARD
-// Allowed: org owner, org admin, or project lead.
-// requireOrgMember must run first — it populates req.org and req.membership.
-// =============================================================================
-
-async function requireWorkflowManager(
-  req:   FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
-  const orgRole = req.membership.role
-  if (orgRole === 'owner' || orgRole === 'admin') return
-
-  const { projectId } = req.params as { projectId: string }
-  const projectRole = await getProjectMemberRole(projectId, req.user.userId)
-  if (projectRole === 'lead') return
-
-  reply.status(403).send({
-    error:   'FORBIDDEN',
-    message: 'Only owners, admins, or project leads can manage workflow statuses',
-  })
-}
 
 // =============================================================================
 // RESPONSE SCHEMAS (Fastify serialization shapes)
@@ -49,6 +25,7 @@ const statusResponseSchema = {
     color:     { type: 'string' },
     position:  { type: 'number' },
     isDefault: { type: 'boolean' },
+    category:  { type: 'string' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
   },
@@ -63,7 +40,7 @@ export const statusesRoutes = async (app: FastifyInstance) => {
 
   // GET / — list statuses ordered by position (any org member)
   app.get('/', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'List workflow statuses',
       description: 'Returns all statuses for this project ordered by position',
@@ -82,7 +59,7 @@ export const statusesRoutes = async (app: FastifyInstance) => {
 
   // POST / — create a new status (workflow managers only)
   app.post('/', {
-    preHandler: [requireOrgMember, requireWorkflowManager],
+    preHandler: [requireProjectAccess('lead')],
     schema: {
       summary:     'Create workflow status',
       description: 'Creates a new status for this project. Position is auto-assigned.',
@@ -115,7 +92,7 @@ export const statusesRoutes = async (app: FastifyInstance) => {
 
   // PATCH /:id — rename, recolor, or reorder (workflow managers only)
   app.patch('/:id', {
-    preHandler: [requireOrgMember, requireWorkflowManager],
+    preHandler: [requireProjectAccess('lead')],
     schema: {
       summary:     'Update workflow status',
       description: 'Rename, recolor, or reorder a status. All fields are optional.',
@@ -156,7 +133,7 @@ export const statusesRoutes = async (app: FastifyInstance) => {
 
   // DELETE /:id — delete with two safety checks (workflow managers only)
   app.delete('/:id', {
-    preHandler: [requireOrgMember, requireWorkflowManager],
+    preHandler: [requireProjectAccess('lead')],
     schema: {
       summary:     'Delete workflow status',
       description: 'Deletes a status. Blocked if issues are still assigned or it is the last one.',

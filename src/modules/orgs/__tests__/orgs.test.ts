@@ -368,4 +368,89 @@ describe('Orgs API', () => {
       expect(res.body.message).toBe('Member removed')
     })
   })
+
+  // ===========================================================================
+  describe('POST /orgs/:slug/transfer-ownership', () => {
+    // Self-contained: fresh org + members so it does not disturb shared state above.
+    let tOwnerToken:   string
+    let tMemberToken:  string
+    let tMemberUserId: string
+    let tOrgSlug:      string
+
+    beforeAll(async () => {
+      const o = await supertest(app.server)
+        .post('/auth/register')
+        .send({ name: 'T Owner', email: `t_owner_${ts}@test.com`, password: 'password123' })
+      tOwnerToken = o.body.accessToken
+
+      const orgRes = await supertest(app.server)
+        .post('/orgs')
+        .set('Authorization', `Bearer ${tOwnerToken}`)
+        .send({ name: 'Transfer Org' })
+      tOrgSlug = orgRes.body.slug
+
+      const m = await supertest(app.server)
+        .post('/auth/register')
+        .send({ name: 'T Member', email: `t_member_${ts}@test.com`, password: 'password123' })
+      tMemberToken  = m.body.accessToken
+      tMemberUserId = m.body.user.id
+
+      const inv = await supertest(app.server)
+        .post(`/orgs/${tOrgSlug}/invite`)
+        .set('Authorization', `Bearer ${tOwnerToken}`)
+        .send({ email: `t_member_${ts}@test.com`, role: 'member' })
+      await supertest(app.server)
+        .post('/orgs/invite/accept')
+        .set('Authorization', `Bearer ${tMemberToken}`)
+        .send({ token: inv.body.token })
+    }, 60000)
+
+    it('should reject transfer by a non-owner — 403', async () => {
+      const res = await supertest(app.server)
+        .post(`/orgs/${tOrgSlug}/transfer-ownership`)
+        .set('Authorization', `Bearer ${tMemberToken}`)
+        .send({ userId: tMemberUserId })
+
+      expect(res.status).toBe(403)
+      expect(res.body.error).toBe('FORBIDDEN')
+    })
+
+    it('should reject transferring to a non-member — 404', async () => {
+      const res = await supertest(app.server)
+        .post(`/orgs/${tOrgSlug}/transfer-ownership`)
+        .set('Authorization', `Bearer ${tOwnerToken}`)
+        .send({ userId: '00000000-0000-0000-0000-000000000000' })
+
+      expect(res.status).toBe(404)
+      expect(res.body.error).toBe('TARGET_NOT_MEMBER')
+    })
+
+    it('should transfer ownership and demote the previous owner to admin', async () => {
+      const res = await supertest(app.server)
+        .post(`/orgs/${tOrgSlug}/transfer-ownership`)
+        .set('Authorization', `Bearer ${tOwnerToken}`)
+        .send({ userId: tMemberUserId })
+
+      expect(res.status).toBe(200)
+      expect(res.body.message).toBe('Ownership transferred')
+
+      // New owner can read the org; verify both roles swapped.
+      const detail = await supertest(app.server)
+        .get(`/orgs/${tOrgSlug}`)
+        .set('Authorization', `Bearer ${tMemberToken}`)
+
+      const members = detail.body.members as Array<{ userId: string; role: string }>
+      expect(members.find(m => m.userId === tMemberUserId)?.role).toBe('owner')
+    })
+
+    it('should block removing the owner — owner cannot be removed', async () => {
+      // tOwner is now an admin; it tries to remove the new owner (tMember).
+      const res = await supertest(app.server)
+        .delete(`/orgs/${tOrgSlug}/members/${tMemberUserId}`)
+        .set('Authorization', `Bearer ${tOwnerToken}`)
+
+      expect(res.status).toBe(403)
+      expect(res.body.error).toBe('FORBIDDEN')
+    })
+  })
 })

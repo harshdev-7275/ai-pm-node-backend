@@ -277,6 +277,20 @@ export const removeMember = async (
 
   await assertRole(orgId, requestingUserId, ['owner', 'admin'])
 
+  // The owner cannot be removed — ownership must be transferred first.
+  // This protects the single-owner invariant (an org always has exactly one owner).
+  const [target] = await db
+    .select({ role: organizationMembers.role })
+    .from(organizationMembers)
+    .where(and(
+      eq(organizationMembers.orgId, orgId),
+      eq(organizationMembers.userId, targetUserId),
+      eq(organizationMembers.isActive, true),
+    ))
+    .limit(1)
+
+  if (target?.role === 'owner') throw new Error('CANNOT_REMOVE_OWNER')
+
   await db
     .update(organizationMembers)
     .set({ isActive: false })
@@ -285,6 +299,62 @@ export const removeMember = async (
       eq(organizationMembers.userId, targetUserId),
       eq(organizationMembers.isActive, true),
     ))
+}
+
+// =============================================================================
+// TRANSFER OWNERSHIP
+// =============================================================================
+
+/**
+ * Hands org ownership to another active member.
+ * The current owner is demoted to admin in the same transaction, so the org
+ * always has exactly one owner. Only the current owner may call this.
+ */
+export const transferOwnership = async (
+  orgId: string,
+  requestingUserId: string,
+  targetUserId: string,
+): Promise<void> => {
+  if (requestingUserId === targetUserId) {
+    throw new Error('CANNOT_TRANSFER_TO_SELF')
+  }
+
+  // Caller must currently be the owner.
+  await assertRole(orgId, requestingUserId, ['owner'])
+
+  // Target must be an active member of this org.
+  const [target] = await db
+    .select({ id: organizationMembers.id })
+    .from(organizationMembers)
+    .where(and(
+      eq(organizationMembers.orgId, orgId),
+      eq(organizationMembers.userId, targetUserId),
+      eq(organizationMembers.isActive, true),
+    ))
+    .limit(1)
+
+  if (!target) throw new Error('TARGET_NOT_MEMBER')
+
+  // Atomic swap: promote the target to owner, demote the current owner to admin.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(organizationMembers)
+      .set({ role: 'owner' })
+      .where(and(
+        eq(organizationMembers.orgId, orgId),
+        eq(organizationMembers.userId, targetUserId),
+        eq(organizationMembers.isActive, true),
+      ))
+
+    await tx
+      .update(organizationMembers)
+      .set({ role: 'admin' })
+      .where(and(
+        eq(organizationMembers.orgId, orgId),
+        eq(organizationMembers.userId, requestingUserId),
+        eq(organizationMembers.isActive, true),
+      ))
+  })
 }
 
 // =============================================================================

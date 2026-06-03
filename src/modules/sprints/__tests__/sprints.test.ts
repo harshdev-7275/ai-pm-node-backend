@@ -295,8 +295,8 @@ describe('Sprints API', () => {
         .set('Authorization', `Bearer ${ownerToken}`)
 
       expect(res.status).toBe(200)
-      expect(res.body.status).toBe('completed')
-      expect(res.body.id).toBe(sprintId)
+      expect(res.body.completedSprint.status).toBe('completed')
+      expect(res.body.completedSprint.id).toBe(sprintId)
     })
   })
 
@@ -409,5 +409,67 @@ describe('Sprints API', () => {
 
       expect(row?.sprintId).toBeNull()
     })
+  })
+
+  // ===========================================================================
+  describe('complete sprint — only unfinished issues move to backlog', () => {
+    it('keeps done issues in the sprint and moves unfinished ones to the backlog', async () => {
+      // Fresh project so its sprint/statuses are isolated from the shared state above
+      const projRes = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ name: 'Complete Behaviour', key: `CB${ts.toString().slice(-4)}` })
+      const pid = projRes.body.id
+
+      const statusesRes = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects/${pid}/issues/statuses`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+      const todo = statusesRes.body.find((s: { category: string }) => s.category === 'todo').id
+      const done = statusesRes.body.find((s: { category: string }) => s.category === 'done').id
+
+      const doneIssue = (await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${pid}/issues`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Finished work', statusId: todo })).body.id
+      const openIssue = (await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${pid}/issues`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Unfinished work', statusId: todo })).body.id
+
+      const sprint = (await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${pid}/sprints`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ name: 'CB Sprint' })).body.id
+
+      for (const id of [doneIssue, openIssue]) {
+        await supertest(app.server)
+          .post(`/orgs/${orgSlug}/projects/${pid}/sprints/${sprint}/issues/${id}`)
+          .set('Authorization', `Bearer ${ownerToken}`)
+      }
+
+      // Mark one issue done, then start + complete the sprint
+      await supertest(app.server)
+        .patch(`/orgs/${orgSlug}/projects/${pid}/issues/${doneIssue}/status`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ statusId: done })
+      await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${pid}/sprints/${sprint}/start`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+      const completeRes = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${pid}/sprints/${sprint}/complete`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ moveIncomplete: true })
+
+      expect(completeRes.status).toBe(200)
+
+      const rows = await db
+        .select({ id: issues.id, sprintId: issues.sprintId })
+        .from(issues)
+        .where(eq(issues.projectId, pid))
+      const sprintOf = (id: string): string | null => rows.find(r => r.id === id)?.sprintId ?? null
+
+      expect(sprintOf(doneIssue)).toBe(sprint)   // completed work stays in the sprint
+      expect(sprintOf(openIssue)).toBeNull()      // unfinished work returns to the backlog
+    }, 30000)
   })
 })
