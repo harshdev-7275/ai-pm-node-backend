@@ -111,6 +111,13 @@ describe('Statuses API', () => {
       .send({ name: 'Statuses Project', key: PROJECT_KEY })
     projectId = projectRes.body.id
 
+    // ── Add the member to the project (role 'member') ────────────────────────
+    // They can read the board but still cannot manage statuses (needs 'lead').
+    await supertest(app.server)
+      .post(`/orgs/${orgSlug}/projects/${projectId}/members`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ userId: memberPayload.userId, role: 'member' })
+
     // ── Grab seeded statuses from DB ─────────────────────────────────────────
     const statuses = await db
       .select()
@@ -159,7 +166,7 @@ describe('Statuses API', () => {
       expect(res.status).toBe(403)
     })
 
-    it('org member can view statuses (read is open to all members)', async () => {
+    it('project member can view statuses', async () => {
       const res = await supertest(app.server)
         .get(`/orgs/${orgSlug}/projects/${projectId}/statuses`)
         .set('Authorization', `Bearer ${memberToken}`)

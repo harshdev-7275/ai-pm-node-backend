@@ -40,6 +40,7 @@ export const createStatus = async (
       color:     input.color,
       position:  nextPosition,
       isDefault: false,
+      category:  input.category,
     })
     .returning()
 
@@ -100,8 +101,9 @@ export const updateStatus = async (
       const [row] = await tx
         .update(issueStatuses)
         .set({
-          ...(input.name  !== undefined && { name: input.name }),
-          ...(input.color !== undefined && { color: input.color }),
+          ...(input.name     !== undefined && { name: input.name }),
+          ...(input.color    !== undefined && { color: input.color }),
+          ...(input.category !== undefined && { category: input.category }),
           position: newPos,
         })
         .where(eq(issueStatuses.id, statusId))
@@ -115,8 +117,9 @@ export const updateStatus = async (
     const [row] = await db
       .update(issueStatuses)
       .set({
-        ...(input.name  !== undefined && { name: input.name }),
-        ...(input.color !== undefined && { color: input.color }),
+        ...(input.name     !== undefined && { name: input.name }),
+        ...(input.color    !== undefined && { color: input.color }),
+        ...(input.category !== undefined && { category: input.category }),
       })
       .where(eq(issueStatuses.id, statusId))
       .returning()
@@ -182,6 +185,7 @@ const toResponse = (s: typeof issueStatuses.$inferSelect): StatusResponse => ({
   color:     s.color,
   position:  s.position,
   isDefault: s.isDefault,
+  category:  s.category,
   createdAt: s.createdAt.toISOString(),
   updatedAt: s.updatedAt.toISOString(),
 })

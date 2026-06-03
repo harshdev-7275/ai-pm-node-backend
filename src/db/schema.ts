@@ -60,6 +60,15 @@ export const issuePriorityEnum = pgEnum('issue_priority', ['critical', 'high', '
 export const sprintStatusEnum = pgEnum('sprint_status', ['planned', 'active', 'completed'])
 
 /**
+ * Workflow category of a status. Statuses themselves are user-customizable per
+ * project, so this category — not the name — tells the app what a column means.
+ * - todo:        not started yet
+ * - in_progress: actively being worked on → sets issues.startedAt
+ * - done:        complete or closed     → sets issues.completedAt
+ */
+export const statusCategoryEnum = pgEnum('status_category', ['todo', 'in_progress', 'done'])
+
+/**
  * How often a project auto-creates the next sprint when the current one completes.
  * - none:      manual sprint creation only (default)
  * - weekly:    new sprint every 7 days
@@ -620,6 +629,13 @@ export const issueStatuses = pgTable('issue_statuses', {
    * Enforced at the application layer, not database level.
    */
   isDefault: boolean('is_default').default(false).notNull(),
+
+  /**
+   * Workflow category — what this column means semantically.
+   * Drives automatic issues.startedAt / issues.completedAt and "is it done?" logic.
+   * Custom statuses default to 'todo' unless a category is specified.
+   */
+  category: statusCategoryEnum('category').default('todo').notNull(),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { createCommentSchema, updateCommentSchema } from './issues.schema.js'
-import { requireOrgMember } from '../orgs/orgs.middleware.js'
+import { requireProjectAccess } from '../../middleware/requireProjectAccess.js'
 import * as commentsService from './comments.service.js'
 
 // =============================================================================
@@ -51,7 +51,7 @@ export const commentsRoutes = async (app: FastifyInstance) => {
 
   // GET /:issueId/comments — list all comments on an issue
   app.get('/:issueId/comments', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'List comments',
       description: 'Returns all non-deleted comments on an issue ordered by creation time',
@@ -70,7 +70,7 @@ export const commentsRoutes = async (app: FastifyInstance) => {
 
   // POST /:issueId/comments — add a comment to an issue
   app.post('/:issueId/comments', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Create comment',
       description: 'Adds a comment (or threaded reply) to an issue',
@@ -102,7 +102,7 @@ export const commentsRoutes = async (app: FastifyInstance) => {
 
   // PATCH /:issueId/comments/:commentId — edit a comment (author only)
   app.patch('/:issueId/comments/:commentId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Update comment',
       description: 'Edits the body of a comment — only the original author may do this',
@@ -146,7 +146,7 @@ export const commentsRoutes = async (app: FastifyInstance) => {
 
   // DELETE /:issueId/comments/:commentId — soft delete (author only)
   app.delete('/:issueId/comments/:commentId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Delete comment',
       description: 'Soft-deletes a comment and replaces its body with "[deleted]" — only the author may do this',

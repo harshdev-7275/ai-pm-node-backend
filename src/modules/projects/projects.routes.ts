@@ -7,6 +7,8 @@ import {
   updateProjectMemberRoleSchema,
 } from './projects.schema.js'
 import { requireOrgMember } from '../orgs/orgs.middleware.js'
+import { requireProjectAccess } from '../../middleware/requireProjectAccess.js'
+import { canCreateProject } from '../../utils/permissions.js'
 import * as projectsService from './projects.service.js'
 
 // =============================================================================
@@ -69,22 +71,6 @@ const messageSchema = {
 }
 
 // =============================================================================
-// HELPERS
-// =============================================================================
-
-// Returns true if the requesting user can manage project membership.
-// Allowed when they are an org owner/admin OR the project lead.
-const canManageProjectMembers = async (
-  orgRole: string,
-  projectId: string,
-  userId: string,
-): Promise<boolean> => {
-  if (orgRole === 'owner' || orgRole === 'admin') return true
-  const projectRole = await projectsService.getProjectMemberRole(projectId, userId)
-  return projectRole === 'lead'
-}
-
-// =============================================================================
 // ROUTES
 // All routes registered under /orgs/:slug/projects in app.ts.
 // requireOrgMember handles JWT verification + org lookup + membership check,
@@ -104,10 +90,15 @@ export const projectsRoutes = async (app: FastifyInstance) => {
       response: {
         201: projectResponseSchema,
         400: errorSchema,
+        403: errorSchema,
         409: errorSchema,
       },
     },
   }, async (req, reply) => {
+    if (!canCreateProject(req.membership.role)) {
+      return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only org owners and admins can create projects' })
+    }
+
     const parsed = createProjectSchema.safeParse(req.body)
 
     if (!parsed.success) {
@@ -159,7 +150,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
 
   // GET /orgs/:slug/projects/:projectId — get project with members
   app.get('/:projectId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Get project',
       description: 'Returns project details including the member list',
@@ -187,7 +178,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
 
   // PATCH /orgs/:slug/projects/:projectId — update project (lead, owner, admin)
   app.patch('/:projectId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('lead')],
     schema: {
       summary:     'Update project',
       description: 'Updates project name, description, icon, color, or archived status',
@@ -202,11 +193,6 @@ export const projectsRoutes = async (app: FastifyInstance) => {
     },
   }, async (req, reply) => {
     const { projectId } = req.params as { slug: string; projectId: string }
-
-    const allowed = await canManageProjectMembers(req.membership.role, projectId, req.user.userId)
-    if (!allowed) {
-      return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only org owners, admins, or project leads can update a project' })
-    }
 
     const parsed = updateProjectSchema.safeParse(req.body)
 
@@ -234,7 +220,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
 
   // GET /orgs/:slug/projects/:projectId/members — list project members
   app.get('/:projectId/members', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('viewer')],
     schema: {
       summary:     'Get project members',
       description: 'Returns all members of the project',
@@ -253,7 +239,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
 
   // POST /orgs/:slug/projects/:projectId/members — add a member (lead, owner, admin)
   app.post('/:projectId/members', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('lead')],
     schema: {
       summary:     'Add project member',
       description: 'Adds an org member to the project — caller must be org owner/admin or project lead',
@@ -268,11 +254,6 @@ export const projectsRoutes = async (app: FastifyInstance) => {
     },
   }, async (req, reply) => {
     const { projectId } = req.params as { slug: string; projectId: string }
-
-    const allowed = await canManageProjectMembers(req.membership.role, projectId, req.user.userId)
-    if (!allowed) {
-      return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only org owners, admins, or project leads can add members' })
-    }
 
     const parsed = addProjectMemberSchema.safeParse(req.body)
 
@@ -300,7 +281,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
 
   // PATCH /orgs/:slug/projects/:projectId/members/:userId — update role (lead, owner, admin)
   app.patch('/:projectId/members/:userId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('lead')],
     schema: {
       summary:     'Update project member role',
       description: 'Changes a member\'s role — caller must be org owner/admin or project lead',
@@ -314,11 +295,6 @@ export const projectsRoutes = async (app: FastifyInstance) => {
     },
   }, async (req, reply) => {
     const { projectId, userId } = req.params as { slug: string; projectId: string; userId: string }
-
-    const allowed = await canManageProjectMembers(req.membership.role, projectId, req.user.userId)
-    if (!allowed) {
-      return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only org owners, admins, or project leads can change member roles' })
-    }
 
     const parsed = updateProjectMemberRoleSchema.safeParse(req.body)
 
@@ -339,7 +315,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
 
   // DELETE /orgs/:slug/projects/:projectId/members/:userId — remove member (lead, owner, admin)
   app.delete('/:projectId/members/:userId', {
-    preHandler: [requireOrgMember],
+    preHandler: [requireProjectAccess('lead')],
     schema: {
       summary:     'Remove project member',
       description: 'Removes a user from the project — caller must be org owner/admin or project lead',
@@ -352,11 +328,6 @@ export const projectsRoutes = async (app: FastifyInstance) => {
     },
   }, async (req, reply) => {
     const { projectId, userId } = req.params as { slug: string; projectId: string; userId: string }
-
-    const allowed = await canManageProjectMembers(req.membership.role, projectId, req.user.userId)
-    if (!allowed) {
-      return reply.status(403).send({ error: 'FORBIDDEN', message: 'Only org owners, admins, or project leads can remove members' })
-    }
 
     await projectsService.removeProjectMember(projectId, userId)
     return reply.status(200).send({ message: 'Member removed from project' })

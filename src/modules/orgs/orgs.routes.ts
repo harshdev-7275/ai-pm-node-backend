@@ -4,6 +4,7 @@ import {
   createOrgSchema,
   inviteMemberSchema,
   updateMemberRoleSchema,
+  transferOwnershipSchema,
 } from './orgs.schema.js'
 import { requireOrgMember } from './orgs.middleware.js'
 import * as orgsService from './orgs.service.js'
@@ -356,6 +357,64 @@ export const orgsRoutes = async (app: FastifyInstance) => {
       if (err instanceof Error) {
         if (err.message === 'CANNOT_REMOVE_SELF') {
           return reply.status(403).send({ error: 'FORBIDDEN', message: 'You cannot remove yourself' })
+        }
+        if (err.message === 'CANNOT_REMOVE_OWNER') {
+          return reply.status(403).send({ error: 'FORBIDDEN', message: 'The owner cannot be removed — transfer ownership first' })
+        }
+        if (err.message === 'FORBIDDEN') {
+          return reply.status(403).send({ error: 'FORBIDDEN', message: 'Insufficient permissions' })
+        }
+      }
+      throw err
+    }
+  })
+
+
+  // POST /orgs/:slug/transfer-ownership — hand ownership to another member (owner only)
+  app.post('/:slug/transfer-ownership', {
+    preHandler: [requireOrgMember],
+    schema: {
+      summary:     'Transfer ownership',
+      description: 'Transfers org ownership to another active member; the current owner becomes an admin. Owner only.',
+      tags:        ['Orgs'],
+      security:    [{ bearerAuth: [] }],
+      response: {
+        200: messageSchema,
+        400: errorSchema,
+        403: errorSchema,
+        404: errorSchema,
+      },
+    },
+  }, async (req, reply) => {
+    if (req.membership.role !== 'owner') {
+      return reply.status(403).send({
+        error:   'FORBIDDEN',
+        message: 'Only the owner can transfer ownership',
+      })
+    }
+
+    const parsed = transferOwnershipSchema.safeParse(req.body)
+
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error:  'VALIDATION_ERROR',
+        issues: parsed.error.issues.map((e: z.core.$ZodIssue) => ({
+          field:   e.path.join('.'),
+          message: e.message,
+        })),
+      })
+    }
+
+    try {
+      await orgsService.transferOwnership(req.org.id, req.user.userId, parsed.data.userId)
+      return reply.status(200).send({ message: 'Ownership transferred' })
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        if (err.message === 'CANNOT_TRANSFER_TO_SELF') {
+          return reply.status(400).send({ error: 'CANNOT_TRANSFER_TO_SELF', message: 'You already own this organization' })
+        }
+        if (err.message === 'TARGET_NOT_MEMBER') {
+          return reply.status(404).send({ error: 'TARGET_NOT_MEMBER', message: 'Target user is not an active member of this organization' })
         }
         if (err.message === 'FORBIDDEN') {
           return reply.status(403).send({ error: 'FORBIDDEN', message: 'Insufficient permissions' })

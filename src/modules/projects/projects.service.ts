@@ -53,11 +53,11 @@ export const createProject = async (
   })
 
   await db.insert(issueStatuses).values([
-    { projectId: project.id, name: 'Todo',        color: '#6b7280', position: 1, isDefault: true  },
-    { projectId: project.id, name: 'In Progress', color: '#3b82f6', position: 2, isDefault: false },
-    { projectId: project.id, name: 'In Review',   color: '#f59e0b', position: 3, isDefault: false },
-    { projectId: project.id, name: 'Done',        color: '#10b981', position: 4, isDefault: false },
-    { projectId: project.id, name: 'Cancelled',   color: '#ef4444', position: 5, isDefault: false },
+    { projectId: project.id, name: 'Todo',        color: '#6b7280', position: 1, isDefault: true,  category: 'todo'        },
+    { projectId: project.id, name: 'In Progress', color: '#3b82f6', position: 2, isDefault: false, category: 'in_progress' },
+    { projectId: project.id, name: 'In Review',   color: '#f59e0b', position: 3, isDefault: false, category: 'in_progress' },
+    { projectId: project.id, name: 'Done',        color: '#10b981', position: 4, isDefault: false, category: 'done'        },
+    { projectId: project.id, name: 'Cancelled',   color: '#ef4444', position: 5, isDefault: false, category: 'done'        },
   ])
 
   return toResponse(project)

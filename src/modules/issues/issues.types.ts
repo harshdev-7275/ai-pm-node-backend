@@ -19,6 +19,7 @@ export interface IssueStatus {
   name:     string
   color:    string
   position: number
+  category: 'todo' | 'in_progress' | 'done'
 }
 
 export interface IssueUser {
@@ -82,6 +83,7 @@ export interface StatusResponse {
   color:     string
   position:  number
   isDefault: boolean
+  category:  'todo' | 'in_progress' | 'done'
   createdAt: string
   updatedAt: string
 }

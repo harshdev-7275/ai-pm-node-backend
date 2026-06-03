@@ -93,7 +93,7 @@ export const getIssuesByProject = async (
 // GET ISSUE BY ID
 // =============================================================================
 
-export const getIssueById = async (issueId: string): Promise<IssueDetail> => {
+export const getIssueById = async (projectId: string, issueId: string): Promise<IssueDetail> => {
   const [row] = await db
     .select({
       issue:    issues,
@@ -105,6 +105,7 @@ export const getIssueById = async (issueId: string): Promise<IssueDetail> => {
     .leftJoin(users, eq(issues.assigneeId, users.id))
     .where(and(
       eq(issues.id, issueId),
+      eq(issues.projectId, projectId),
       isNull(issues.deletedAt),
     ))
     .limit(1)
@@ -127,6 +128,7 @@ export const getIssueById = async (issueId: string): Promise<IssueDetail> => {
       name:     row.status.name,
       color:    row.status.color,
       position: row.status.position,
+      category: row.status.category,
     },
     assignee: row.assignee
       ? { id: row.assignee.id, name: row.assignee.name, email: row.assignee.email, avatarUrl: row.assignee.avatarUrl ?? null }
@@ -163,6 +165,7 @@ const HISTORY_FIELD_MAP: Record<
 }
 
 export const updateIssue = async (
+  projectId: string,
   issueId:   string,
   input:     UpdateIssueInput,
   changedBy: string,
@@ -170,10 +173,16 @@ export const updateIssue = async (
   const [current] = await db
     .select()
     .from(issues)
-    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+    .where(and(eq(issues.id, issueId), eq(issues.projectId, projectId), isNull(issues.deletedAt)))
     .limit(1)
 
   if (!current) throw new Error('ISSUE_NOT_FOUND')
+
+  // When the status changes, derive startedAt/completedAt from the new status's category.
+  const statusTs =
+    input.statusId !== undefined && input.statusId !== current.statusId
+      ? await computeStatusTimestamps(projectId, input.statusId, current)
+      : null
 
   const [issue] = await db
     .update(issues)
@@ -182,6 +191,7 @@ export const updateIssue = async (
       ...(input.description    !== undefined && { description: input.description }),
       ...(input.type           !== undefined && { type: input.type }),
       ...(input.statusId       !== undefined && { statusId: input.statusId }),
+      ...(statusTs !== null && { startedAt: statusTs.startedAt, completedAt: statusTs.completedAt }),
       ...(input.priority       !== undefined && { priority: input.priority }),
       ...(input.assigneeId     !== undefined && { assigneeId: input.assigneeId }),
       ...(input.parentId       !== undefined && { parentId: input.parentId }),
@@ -192,6 +202,7 @@ export const updateIssue = async (
     })
     .where(and(
       eq(issues.id, issueId),
+      eq(issues.projectId, projectId),
       isNull(issues.deletedAt),
     ))
     .returning()
@@ -224,23 +235,27 @@ export const updateIssue = async (
 // =============================================================================
 
 export const updateIssueStatus = async (
+  projectId: string,
   issueId:   string,
   input:     UpdateIssueStatusInput,
   changedBy: string,
 ): Promise<IssueResponse> => {
   const [current] = await db
-    .select({ statusId: issues.statusId })
+    .select({ statusId: issues.statusId, startedAt: issues.startedAt, completedAt: issues.completedAt })
     .from(issues)
-    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+    .where(and(eq(issues.id, issueId), eq(issues.projectId, projectId), isNull(issues.deletedAt)))
     .limit(1)
 
   if (!current) throw new Error('ISSUE_NOT_FOUND')
 
+  const { startedAt, completedAt } = await computeStatusTimestamps(projectId, input.statusId, current)
+
   const [issue] = await db
     .update(issues)
-    .set({ statusId: input.statusId })
+    .set({ statusId: input.statusId, startedAt, completedAt })
     .where(and(
       eq(issues.id, issueId),
+      eq(issues.projectId, projectId),
       isNull(issues.deletedAt),
     ))
     .returning()
@@ -262,12 +277,13 @@ export const updateIssueStatus = async (
 // DELETE ISSUE  (soft delete)
 // =============================================================================
 
-export const deleteIssue = async (issueId: string): Promise<void> => {
+export const deleteIssue = async (projectId: string, issueId: string): Promise<void> => {
   const [issue] = await db
     .update(issues)
     .set({ deletedAt: new Date() })
     .where(and(
       eq(issues.id, issueId),
+      eq(issues.projectId, projectId),
       isNull(issues.deletedAt),
     ))
     .returning({ id: issues.id })
@@ -291,7 +307,14 @@ export const getIssueStatuses = async (projectId: string) => {
 // GET ISSUE HISTORY
 // =============================================================================
 
-export const getIssueHistory = async (issueId: string): Promise<IssueHistoryEntry[]> => {
+export const getIssueHistory = async (projectId: string, issueId: string): Promise<IssueHistoryEntry[]> => {
+  const [exists] = await db
+    .select({ id: issues.id })
+    .from(issues)
+    .where(and(eq(issues.id, issueId), eq(issues.projectId, projectId)))
+    .limit(1)
+  if (!exists) throw new Error('ISSUE_NOT_FOUND')
+
   const rows = await db
     .select({
       history: issueHistory,
@@ -320,6 +343,37 @@ export const getIssueHistory = async (issueId: string): Promise<IssueHistoryEntr
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+/**
+ * Derives startedAt/completedAt for an issue moving to `newStatusId`, based on
+ * the target status's workflow category:
+ *   - in_progress / done → stamp startedAt once (if not already set)
+ *   - done               → stamp completedAt (kept if already done)
+ *   - todo / in_progress → clear completedAt (issue reopened)
+ * Throws STATUS_NOT_FOUND if the status does not belong to the project.
+ */
+async function computeStatusTimestamps(
+  projectId:   string,
+  newStatusId: string,
+  current:     { startedAt: Date | null; completedAt: Date | null },
+): Promise<{ startedAt: Date | null; completedAt: Date | null }> {
+  const [status] = await db
+    .select({ category: issueStatuses.category })
+    .from(issueStatuses)
+    .where(and(eq(issueStatuses.id, newStatusId), eq(issueStatuses.projectId, projectId)))
+    .limit(1)
+
+  if (!status) throw new Error('STATUS_NOT_FOUND')
+
+  const now = new Date()
+  const startedAt =
+    current.startedAt ??
+    (status.category === 'in_progress' || status.category === 'done' ? now : null)
+  const completedAt =
+    status.category === 'done' ? (current.completedAt ?? now) : null
+
+  return { startedAt, completedAt }
+}
 
 const toResponse = (i: typeof issues.$inferSelect): IssueResponse => ({
   id:             i.id,

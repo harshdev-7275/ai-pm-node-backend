@@ -56,6 +56,7 @@ describe('Issues API', () => {
   let projectId:     string
   let defaultStatusId: string   // "Todo" status seeded on project creation
   let secondStatusId:  string   // "In Progress" — used for status update tests
+  let doneStatusId:    string   // "Done" — category 'done', drives completedAt
   let issueId:       string     // created in POST tests, used throughout
 
   const ts           = Date.now()
@@ -95,6 +96,7 @@ describe('Issues API', () => {
 
     defaultStatusId = statuses[0]!.id   // Todo (position 1, isDefault)
     secondStatusId  = statuses[1]!.id   // In Progress (position 2)
+    doneStatusId    = statuses[3]!.id   // Done (position 4, category 'done')
 
     // 5 — Register outsider (never joins the org)
     const outsiderRes = await supertest(app.server)
@@ -316,6 +318,66 @@ describe('Issues API', () => {
 
       expect(res.status).toBe(400)
       expect(res.body.error).toBe('VALIDATION_ERROR')
+    })
+  })
+
+  // ===========================================================================
+  describe('status category drives startedAt / completedAt', () => {
+    let tsIssueId: string
+
+    it('a fresh issue in a todo status has no startedAt/completedAt', async () => {
+      const res = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Timestamp issue', statusId: defaultStatusId })
+
+      expect(res.status).toBe(201)
+      tsIssueId = res.body.id
+      expect(res.body.startedAt).toBeNull()
+      expect(res.body.completedAt).toBeNull()
+    })
+
+    it('sets startedAt when moved to an in_progress status', async () => {
+      const res = await supertest(app.server)
+        .patch(`/orgs/${orgSlug}/projects/${projectId}/issues/${tsIssueId}/status`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ statusId: secondStatusId })
+
+      expect(res.status).toBe(200)
+      expect(res.body.startedAt).not.toBeNull()
+      expect(res.body.completedAt).toBeNull()
+    })
+
+    it('sets completedAt when moved to a done status', async () => {
+      const res = await supertest(app.server)
+        .patch(`/orgs/${orgSlug}/projects/${projectId}/issues/${tsIssueId}/status`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ statusId: doneStatusId })
+
+      expect(res.status).toBe(200)
+      expect(res.body.completedAt).not.toBeNull()
+      expect(res.body.startedAt).not.toBeNull()
+    })
+
+    it('clears completedAt when moved back out of done (startedAt preserved)', async () => {
+      const res = await supertest(app.server)
+        .patch(`/orgs/${orgSlug}/projects/${projectId}/issues/${tsIssueId}/status`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ statusId: defaultStatusId })
+
+      expect(res.status).toBe(200)
+      expect(res.body.completedAt).toBeNull()
+      expect(res.body.startedAt).not.toBeNull()
+    })
+
+    it('rejects a statusId that does not belong to the project — 400', async () => {
+      const res = await supertest(app.server)
+        .patch(`/orgs/${orgSlug}/projects/${projectId}/issues/${tsIssueId}/status`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ statusId: '00000000-0000-0000-0000-000000000000' })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error).toBe('STATUS_NOT_FOUND')
     })
   })
 
