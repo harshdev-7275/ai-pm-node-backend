@@ -16,19 +16,27 @@ import { resolveProjectAccess, meetsAccess, type AccessLevel } from '../utils/pe
  *
  * On success it attaches req.org, req.membership and req.projectRole.
  *
- * The AI service may call via a valid X-Bot-Secret header; it acts at 'lead'
- * level (matching the previous requireBotOrMember behaviour) so internal
- * automation keeps working, but is still bound to a project inside the org.
+ * The AI service may call via a valid X-Bot-Secret header. That secret only
+ * authenticates the SERVICE — it does NOT grant access. The bot must identify
+ * the acting user via X-Bot-User-Id, and the action is authorized against that
+ * user's real effective access, exactly as if they had called it themselves.
  */
 export function requireProjectAccess(minRole: AccessLevel) {
   return async function projectAccessGuard(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const { slug, projectId } = req.params as { slug: string; projectId: string }
 
-    // --- Bot path: trusted service-to-service call ---------------------------
+    // --- Bot path: secret authenticates the service; the action is authorized
+    //     as the acting user (X-Bot-User-Id) — never blanket 'lead'. ----------
     const botSecret = req.headers['x-bot-secret']
     if (botSecret) {
       if (botSecret !== env.BOT_SECRET) {
         reply.status(401).send({ error: 'UNAUTHORIZED', message: 'Invalid bot secret' })
+        return
+      }
+
+      const botUserId = req.headers['x-bot-user-id'] as string | undefined
+      if (!botUserId) {
+        reply.status(403).send({ error: 'FORBIDDEN', message: 'Bot calls must identify the acting user' })
         return
       }
 
@@ -42,10 +50,16 @@ export function requireProjectAccess(minRole: AccessLevel) {
         return
       }
 
+      const { access } = await resolveEffectiveAccess(org.id, projectId, botUserId)
+      if (access === null || !meetsAccess(access, minRole)) {
+        reply.status(403).send({ error: 'FORBIDDEN', message: `This action requires project ${minRole} access` })
+        return
+      }
+
       req.org         = org
       req.isBot       = true
-      req.botUserId   = req.headers['x-bot-user-id'] as string | undefined
-      req.projectRole = 'lead'
+      req.botUserId   = botUserId
+      req.projectRole = access
       return
     }
 
@@ -63,37 +77,17 @@ export function requireProjectAccess(minRole: AccessLevel) {
       return
     }
 
-    const [membership] = await db
-      .select({ id: organizationMembers.id, role: organizationMembers.role })
-      .from(organizationMembers)
-      .where(and(
-        eq(organizationMembers.orgId, org.id),
-        eq(organizationMembers.userId, req.user.userId),
-        eq(organizationMembers.isActive, true),
-      ))
-      .limit(1)
-
-    if (!membership) {
-      reply.status(403).send({ error: 'FORBIDDEN', message: 'You are not a member of this organization' })
-      return
-    }
-
     // Project must exist AND belong to this org (tenant isolation).
     if (!(await projectBelongsToOrg(projectId, org.id))) {
       reply.status(404).send({ error: 'PROJECT_NOT_FOUND', message: 'Project not found' })
       return
     }
 
-    const [pm] = await db
-      .select({ role: projectMembers.role })
-      .from(projectMembers)
-      .where(and(
-        eq(projectMembers.projectId, projectId),
-        eq(projectMembers.userId, req.user.userId),
-      ))
-      .limit(1)
-
-    const access = resolveProjectAccess(membership.role, pm?.role ?? null)
+    const { membership, access } = await resolveEffectiveAccess(org.id, projectId, req.user.userId)
+    if (!membership) {
+      reply.status(403).send({ error: 'FORBIDDEN', message: 'You are not a member of this organization' })
+      return
+    }
     if (access === null || !meetsAccess(access, minRole)) {
       reply.status(403).send({ error: 'FORBIDDEN', message: `This action requires project ${minRole} access` })
       return
@@ -105,6 +99,47 @@ export function requireProjectAccess(minRole: AccessLevel) {
     req.isBot       = false
     req.botUserId   = undefined
   }
+}
+
+/**
+ * Resolve a user's effective project access by combining their active org
+ * membership with their explicit project membership. Shared by the bot and
+ * user paths so both authorize identically.
+ *
+ * Returns the org-membership row (null when the user is not an active member of
+ * the org) and the resolved access level (null when they are an org member but
+ * have no access to this particular project).
+ */
+async function resolveEffectiveAccess(
+  orgId: string,
+  projectId: string,
+  userId: string,
+): Promise<{
+  membership: Pick<typeof organizationMembers.$inferSelect, 'id' | 'role'> | null
+  access: AccessLevel | null
+}> {
+  const [membership] = await db
+    .select({ id: organizationMembers.id, role: organizationMembers.role })
+    .from(organizationMembers)
+    .where(and(
+      eq(organizationMembers.orgId, orgId),
+      eq(organizationMembers.userId, userId),
+      eq(organizationMembers.isActive, true),
+    ))
+    .limit(1)
+
+  if (!membership) return { membership: null, access: null }
+
+  const [pm] = await db
+    .select({ role: projectMembers.role })
+    .from(projectMembers)
+    .where(and(
+      eq(projectMembers.projectId, projectId),
+      eq(projectMembers.userId, userId),
+    ))
+    .limit(1)
+
+  return { membership, access: resolveProjectAccess(membership.role, pm?.role ?? null) }
 }
 
 async function loadOrg(slug: string): Promise<typeof organizations.$inferSelect | null> {

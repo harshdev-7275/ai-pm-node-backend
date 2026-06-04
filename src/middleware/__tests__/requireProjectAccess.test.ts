@@ -78,11 +78,13 @@ describe('requireProjectAccess — project-role enforcement', () => {
   const ts = Date.now()
 
   let ownerToken:    string
+  let ownerUserId:   string
   let viewerToken:   string
   let viewerUserId:  string
   let memberToken:   string
   let memberUserId:  string
-  let strangerToken: string  // org member, NOT added to the project
+  let strangerToken:  string  // org member, NOT added to the project
+  let strangerUserId: string
   let orgSlug:       string
   let projectId:     string
   let statusId:      string
@@ -94,7 +96,8 @@ describe('requireProjectAccess — project-role enforcement', () => {
     app = await buildTestApp()
 
     const owner = await register(app, 'PA Owner', `pa_owner_${ts}@test.com`)
-    ownerToken = owner.token
+    ownerToken  = owner.token
+    ownerUserId = owner.userId
 
     const orgRes = await supertest(app.server)
       .post('/orgs')
@@ -135,7 +138,8 @@ describe('requireProjectAccess — project-role enforcement', () => {
 
     // stranger: org member but NOT added to the project
     const stranger = await register(app, 'PA Stranger', `pa_stranger_${ts}@test.com`)
-    strangerToken = stranger.token
+    strangerToken  = stranger.token
+    strangerUserId = stranger.userId
     await joinOrg(app, orgSlug, ownerToken, `pa_stranger_${ts}@test.com`, strangerToken)
 
     // Second org with its own project (different tenant)
@@ -218,5 +222,68 @@ describe('requireProjectAccess — project-role enforcement', () => {
       .set('Authorization', `Bearer ${ownerToken}`)
     expect(res.status).toBe(404)
     expect(res.body.error).toBe('PROJECT_NOT_FOUND')
+  })
+
+  // ===========================================================================
+  // BOT PATH — the AI service authenticates with X-Bot-Secret and acts on
+  // behalf of the user in X-Bot-User-Id. The bot secret authenticates the
+  // SERVICE; it must NOT grant blanket 'lead'. The acting user's real project
+  // access governs what the bot may do.
+  // ===========================================================================
+
+  describe('bot path — authorizes as the acting user, not blanket lead', () => {
+    const createIssueAsBot = (botUserId?: string) => {
+      const r = supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('X-Bot-Secret', env.BOT_SECRET)
+        .send({ title: 'Bot issue', statusId, type: 'task', priority: 'medium' })
+      return botUserId ? r.set('X-Bot-User-Id', botUserId) : r
+    }
+
+    it('rejects an invalid bot secret — 401', async () => {
+      const res = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('X-Bot-Secret', 'not-the-real-secret')
+        .set('X-Bot-User-Id', memberUserId)
+        .send({ title: 'Bot issue', statusId, type: 'task', priority: 'medium' })
+      expect(res.status).toBe(401)
+    })
+
+    it('rejects a bot write with NO acting user — 403', async () => {
+      const res = await createIssueAsBot()
+      expect(res.status).toBe(403)
+      expect(res.body.error).toBe('FORBIDDEN')
+    })
+
+    it('bot acting as a project VIEWER CANNOT create an issue — 403', async () => {
+      const res = await createIssueAsBot(viewerUserId)
+      expect(res.status).toBe(403)
+      expect(res.body.error).toBe('FORBIDDEN')
+    })
+
+    it('bot acting as an org member NOT on the project CANNOT create — 403', async () => {
+      const res = await createIssueAsBot(strangerUserId)
+      expect(res.status).toBe(403)
+      expect(res.body.error).toBe('FORBIDDEN')
+    })
+
+    it('bot acting as a project MEMBER CAN create an issue — 201', async () => {
+      const res = await createIssueAsBot(memberUserId)
+      expect(res.status).toBe(201)
+      expect(res.body.id).toBeDefined()
+    })
+
+    it('bot acting as an org OWNER (resolves to lead) CAN create an issue — 201', async () => {
+      const res = await createIssueAsBot(ownerUserId)
+      expect(res.status).toBe(201)
+    })
+
+    it('bot acting as a project VIEWER CAN still read issues — 200', async () => {
+      const res = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('X-Bot-Secret', env.BOT_SECRET)
+        .set('X-Bot-User-Id', viewerUserId)
+      expect(res.status).toBe(200)
+    })
   })
 })
