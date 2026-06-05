@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, boolean, integer, timestamp, pgEnum } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, varchar, boolean, integer, bigint, timestamp, pgEnum } from 'drizzle-orm/pg-core'
 
 // =============================================================================
 // ENUMS
@@ -1179,6 +1179,40 @@ export const kgSyncLog = pgTable('kg_sync_log', {
   syncedAt:   timestamp('synced_at', { withTimezone: true }),
 
   createdAt:  timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+
+/**
+ * org_usage
+ * Per-organization LLM metering counters — the source of truth for
+ * cross-instance token + request accounting.
+ *
+ * The Python AI service (METERING_BACKEND=postgres) calls the node-api's
+ * /admin/metering/* routes, which read and increment this table. Keeping the
+ * counters in Postgres (not in-process) means multiple ai-service instances
+ * see the same numbers and a deploy does not reset the quota.
+ *
+ * Keyed by org slug (not org UUID) because the AI service identifies tenants
+ * by slug throughout the chat pipeline — it never sees the internal UUID.
+ */
+export const orgUsage = pgTable('org_usage', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  /** Org slug — the tenant key the AI service meters against. One row per org. */
+  orgSlug: varchar('org_slug', { length: 100 }).notNull().unique(),
+
+  /**
+   * Cumulative LLM tokens consumed by this org across all chat requests.
+   * bigint because a busy org can exceed 2^31 tokens over its lifetime.
+   * mode:'number' keeps it as a JS number (safe well past any real usage).
+   */
+  tokens: bigint('tokens', { mode: 'number' }).default(0).notNull(),
+
+  /** Cumulative number of chat requests this org has made. */
+  requests: integer('requests').default(0).notNull(),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
 
