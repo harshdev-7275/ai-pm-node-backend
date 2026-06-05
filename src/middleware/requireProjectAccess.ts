@@ -60,6 +60,17 @@ export function requireProjectAccess(minRole: AccessLevel) {
       req.isBot       = true
       req.botUserId   = botUserId
       req.projectRole = access
+      // Synthesize req.user so downstream handlers can use the uniform
+      // `req.user.userId` access pattern. Without this, every bot-originated
+      // write (PATCH, comment-create, etc.) that uses `req.user.userId`
+      // directly crashes with "Cannot read properties of null (reading
+      // 'userId')" — see the regression tests in
+      // middleware/__tests__/requireProjectAccess.test.ts.
+      //
+      // Only userId is set. Routes that read email/sessionId are user-only
+      // and TypeScript now flags them as accessing optional fields
+      // (see AuthUser in types/fastify.d.ts).
+      req.user        = { userId: botUserId }
       return
     }
 

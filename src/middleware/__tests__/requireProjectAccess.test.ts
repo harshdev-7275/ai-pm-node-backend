@@ -8,6 +8,7 @@ import { authRoutes } from '../../modules/auth/auth.routes.js'
 import { orgsRoutes } from '../../modules/orgs/orgs.routes.js'
 import { projectsRoutes } from '../../modules/projects/projects.routes.js'
 import { issuesRoutes } from '../../modules/issues/issues.routes.js'
+import { commentsRoutes } from '../../modules/issues/comments.routes.js'
 import { sprintsRoutes } from '../../modules/sprints/sprints.routes.js'
 import { handleError } from '../errorHandler.js'
 import { env } from '../../config/env.js'
@@ -44,6 +45,7 @@ const buildTestApp = async () => {
   await app.register(orgsRoutes,     { prefix: '/orgs' })
   await app.register(projectsRoutes, { prefix: '/orgs/:slug/projects' })
   await app.register(issuesRoutes,   { prefix: '/orgs/:slug/projects/:projectId/issues' })
+  await app.register(commentsRoutes, { prefix: '/orgs/:slug/projects/:projectId/issues' })
   await app.register(sprintsRoutes,  { prefix: '/orgs/:slug/projects/:projectId/sprints' })
 
   await app.ready()
@@ -284,6 +286,43 @@ describe('requireProjectAccess — project-role enforcement', () => {
         .set('X-Bot-Secret', env.BOT_SECRET)
         .set('X-Bot-User-Id', viewerUserId)
       expect(res.status).toBe(200)
+    })
+
+    // --- regression: bot path must synthesize req.user so PATCH works -------
+    // The pre-fix bug: PATCH /issues/:id accessed req.user.userId directly
+    // (no req.isBot fallback), so every bot-originated PATCH crashed with
+    // "Cannot read properties of null (reading 'userId')" — surfaced by
+    // the AI assistant's "assign all open issues to Ranu" bulk call.
+    it('bot acting as a project MEMBER CAN update an issue — 200', async () => {
+      // Create an issue first (as the bot acting as member — already covered above)
+      const create = await createIssueAsBot(memberUserId)
+      expect(create.status).toBe(201)
+      const issueId = create.body.id as string
+
+      // PATCH it as the bot — this used to 500
+      const res = await supertest(app.server)
+        .patch(`/orgs/${orgSlug}/projects/${projectId}/issues/${issueId}`)
+        .set('X-Bot-Secret', env.BOT_SECRET)
+        .set('X-Bot-User-Id', memberUserId)
+        .send({ priority: 'high' })
+
+      expect(res.status).toBe(200)
+      expect(res.body.priority).toBe('high')
+    })
+
+    it('bot acting as a project MEMBER CAN add a comment — 201', async () => {
+      // Same family of bug — POST /:issueId/comments used to crash for the
+      // same reason. Locked in here so a future refactor can't regress it.
+      const create = await createIssueAsBot(memberUserId)
+      const issueId = create.body.id as string
+
+      const res = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues/${issueId}/comments`)
+        .set('X-Bot-Secret', env.BOT_SECRET)
+        .set('X-Bot-User-Id', memberUserId)
+        .send({ body: 'bot comment' })
+
+      expect(res.status).toBe(201)
     })
   })
 })
