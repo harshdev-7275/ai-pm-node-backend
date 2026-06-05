@@ -2,6 +2,7 @@ import { and, eq, isNull, asc, count } from 'drizzle-orm'
 import { db } from '../../db/index.js'
 import { sprints, issues, projects } from '../../db/schema.js'
 import { AppError } from '../../utils/errors.js'
+import { emitGraphEvent } from '../../utils/graphEvents.js'
 import type {
   CreateSprintInput,
   UpdateSprintInput,
@@ -114,7 +115,10 @@ export const createSprint = async (
 
   if (!sprint) throw new AppError('SPRINT_CREATION_FAILED', 'Failed to create sprint', 500)
 
-  return toSprintResponse(sprint)
+  const response = toSprintResponse(sprint)
+  // Keep the graph's Sprint node in step with this direct REST write.
+  emitGraphEvent('sprint', response)
+  return response
 }
 
 // =============================================================================
@@ -148,7 +152,9 @@ export const updateSprint = async (
 
   if (!updated) throw new AppError('SPRINT_UPDATE_FAILED', 'Failed to update sprint', 500)
 
-  return toSprintResponse(updated)
+  const response = toSprintResponse(updated)
+  emitGraphEvent('sprint', response)
+  return response
 }
 
 // =============================================================================
@@ -209,7 +215,9 @@ export const startSprint = async (projectId: string, sprintId: string): Promise<
 
   if (!updated) throw new AppError('SPRINT_START_FAILED', 'Failed to start sprint', 500)
 
-  return toSprintResponse(updated)
+  const response = toSprintResponse(updated)
+  emitGraphEvent('sprint', response)
+  return response
 }
 
 // =============================================================================
@@ -267,6 +275,7 @@ export const completeSprint = async (
   if (!updated) throw new AppError('SPRINT_COMPLETE_FAILED', 'Failed to complete sprint', 500)
 
   const completedSprint = toSprintResponse(updated)
+  emitGraphEvent('sprint', completedSprint)
 
   // Check if the project has cadence auto-create enabled
   const [project] = await db
@@ -322,7 +331,9 @@ export const completeSprint = async (
 
   if (!nextRow) throw new AppError('SPRINT_AUTO_CREATE_FAILED', 'Failed to auto-create next sprint', 500)
 
-  return { completedSprint, nextSprint: toSprintResponse(nextRow) }
+  const nextSprint = toSprintResponse(nextRow)
+  emitGraphEvent('sprint', nextSprint)
+  return { completedSprint, nextSprint }
 }
 
 // =============================================================================

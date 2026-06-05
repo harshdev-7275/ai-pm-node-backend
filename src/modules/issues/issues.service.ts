@@ -1,6 +1,7 @@
 import { and, eq, isNull, asc, desc } from 'drizzle-orm'
 import { db } from '../../db/index.js'
 import { issues, projects, issueStatuses, users, issueHistory } from '../../db/schema.js'
+import { emitGraphEvent } from '../../utils/graphEvents.js'
 import type {
   CreateIssueInput,
   UpdateIssueInput,
@@ -61,7 +62,10 @@ export const createIssue = async (
     return issue
   })
 
-  return toResponse(result)
+  const response = toResponse(result)
+  // Keep the graph in step with this direct REST write (best-effort, non-blocking).
+  emitGraphEvent('issue', response)
+  return response
 }
 
 // =============================================================================
@@ -227,7 +231,9 @@ export const updateIssue = async (
     await db.insert(issueHistory).values(historyRows)
   }
 
-  return toResponse(issue)
+  const response = toResponse(issue)
+  emitGraphEvent('issue', response)
+  return response
 }
 
 // =============================================================================
@@ -270,7 +276,9 @@ export const updateIssueStatus = async (
     newValue:     input.statusId,
   })
 
-  return toResponse(issue)
+  const response = toResponse(issue)
+  emitGraphEvent('issue', response)
+  return response
 }
 
 // =============================================================================

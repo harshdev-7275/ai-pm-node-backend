@@ -15,6 +15,13 @@
       "when": 1780525214584,
       "tag": "0001_thankful_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780681210080,
+      "tag": "0002_hard_piledriver",
+      "breakpoints": true
     }
   ]
 }
