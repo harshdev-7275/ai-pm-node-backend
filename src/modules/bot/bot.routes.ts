@@ -3,7 +3,7 @@ import { db } from '../../db/index.js'
 import { organizations } from '../../db/schema.js'
 import { eq } from 'drizzle-orm'
 import { botAuth } from '../../middleware/botAuth.js'
-import { getIssuesByProject, getIssueStatuses } from '../issues/issues.service.js'
+import { getIssuesByProjectWithRelations, getIssueStatuses } from '../issues/issues.service.js'
 import { listSprints, addIssueToSprint } from '../sprints/sprints.service.js'
 import { getOrgMembers } from '../orgs/orgs.service.js'
 import { getAllProjectsByOrg, getProjectMembers } from '../projects/projects.service.js'
@@ -79,7 +79,9 @@ export const botRoutes = async (app: FastifyInstance) => {
     },
   }, async (req, reply) => {
     const { projectId } = req.params as { slug: string; projectId: string }
-    const issues = await getIssuesByProject(projectId)
+    // Resolved status + assignee names (not raw IDs) so the AI can answer
+    // "who is assigned to what" — see issues.service getIssuesByProjectWithRelations.
+    const issues = await getIssuesByProjectWithRelations(projectId)
     return reply.status(200).send(issues)
   })
 
