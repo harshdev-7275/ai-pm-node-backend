@@ -59,6 +59,14 @@ export interface IssueDetail extends IssueResponse {
   reporter: IssueUser
 }
 
+// A list row with its status and assignee resolved to full objects (names, not
+// raw IDs). Lighter than IssueDetail — no reporter join — for list endpoints
+// that need human-readable assignee/status, e.g. the bot/AI issue list.
+export interface IssueListItem extends IssueResponse {
+  status:   IssueStatus
+  assignee: IssueUser | null
+}
+
 export interface CommentAuthor {
   id:        string
   name:      string

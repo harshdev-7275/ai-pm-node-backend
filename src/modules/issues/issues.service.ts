@@ -8,6 +8,7 @@ import type {
   UpdateIssueStatusInput,
   IssueResponse,
   IssueDetail,
+  IssueListItem,
   IssueHistoryEntry,
 } from './issues.types.js'
 
@@ -91,6 +92,55 @@ export const getIssuesByProject = async (
     .offset(offset)
 
   return rows.map(toResponse)
+}
+
+// =============================================================================
+// GET ISSUES BY PROJECT — WITH RELATIONS (status + assignee resolved)
+// =============================================================================
+
+// Like getIssuesByProject, but resolves each issue's status and assignee to
+// their full objects (names, not raw IDs) in a single joined query. Used by the
+// bot/AI list endpoint, which needs human-readable assignee + status to answer
+// questions like "who is assigned to what". The plain getIssuesByProject stays
+// ID-only for the frontend board (it resolves members client-side), so its
+// callers are unaffected.
+export const getIssuesByProjectWithRelations = async (
+  projectId: string,
+  options?: { limit?: number; offset?: number },
+): Promise<IssueListItem[]> => {
+  const limit = options?.limit ?? 100
+  const offset = options?.offset ?? 0
+
+  const rows = await db
+    .select({
+      issue:    issues,
+      status:   issueStatuses,
+      assignee: users,
+    })
+    .from(issues)
+    .innerJoin(issueStatuses, eq(issues.statusId, issueStatuses.id))
+    .leftJoin(users, eq(issues.assigneeId, users.id))
+    .where(and(
+      eq(issues.projectId, projectId),
+      isNull(issues.deletedAt),
+    ))
+    .orderBy(asc(issues.number))
+    .limit(limit)
+    .offset(offset)
+
+  return rows.map((row) => ({
+    ...toResponse(row.issue),
+    status: {
+      id:       row.status.id,
+      name:     row.status.name,
+      color:    row.status.color,
+      position: row.status.position,
+      category: row.status.category,
+    },
+    assignee: row.assignee
+      ? { id: row.assignee.id, name: row.assignee.name, email: row.assignee.email, avatarUrl: row.assignee.avatarUrl ?? null }
+      : null,
+  }))
 }
 
 // =============================================================================
