@@ -177,7 +177,10 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
-      const actorId = req.isBot ? (req.botUserId ?? req.org.id) : req.user.userId
+      // req.user is always set after requireProjectAccess — synthesized on the
+      // bot path, full TokenPayload on the user path. See middleware and
+      // types/fastify.d.ts.
+      const actorId = req.user.userId
       const issue = await issuesService.createIssue(
         parsed.data,
         projectId,
@@ -296,7 +299,8 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
-      const actorId = req.isBot ? (req.botUserId ?? req.org.id) : req.user.userId
+      // req.user is always set after requireProjectAccess (see middleware).
+      const actorId = req.user.userId
       const issue = await issuesService.updateIssueStatus(projectId, issueId, parsed.data, actorId)
       const actorName = await getActorName(actorId)
       broadcast(projectId, {

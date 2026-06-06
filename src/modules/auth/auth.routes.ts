@@ -258,7 +258,10 @@ export const authRoutes = async (app: FastifyInstance) => {
       },
     },
   }, async (req, reply) => {
-    await authService.logout(req.user.sessionId)
+    // sessionId is optional in AuthUser (the bot path doesn't have it), but
+    // this route is gated by `authenticate` — the JWT always carries a
+    // sessionId, so it's safe to assert non-null.
+    await authService.logout(req.user.sessionId!)
 
     reply.clearCookie('refresh_token', { path: REFRESH_COOKIE_PATH })
 
