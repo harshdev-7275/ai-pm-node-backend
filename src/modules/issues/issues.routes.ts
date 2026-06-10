@@ -37,6 +37,7 @@ const issueResponseSchema = {
     title:          { type: 'string' },
     description:    { type: 'string', nullable: true },
     type:           { type: 'string' },
+    categoryId:     { type: 'string' },
     priority:       { type: 'string' },
     statusId:       { type: 'string' },
     assigneeId:     { type: 'string', nullable: true },
@@ -88,6 +89,20 @@ const issueDetailSchema = {
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+// Subtask hierarchy violations from issues.service — all client errors (400)
+const PARENT_ERRORS: Record<string, string> = {
+  PARENT_NOT_FOUND:   'Parent issue not found in this project',
+  PARENT_NOT_ALLOWED: 'Only subtasks can have a parent issue',
+  PARENT_IS_SUBTASK:  'A subtask cannot be the parent of another issue',
+}
+
+function mapParentError(err: unknown): { error: string; message: string } | null {
+  if (err instanceof Error && err.message in PARENT_ERRORS) {
+    return { error: err.message, message: PARENT_ERRORS[err.message]! }
+  }
+  return null
+}
 
 async function getActorName(userId: string): Promise<string> {
   const [user] = await db
@@ -194,6 +209,8 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       if (err instanceof Error && err.message === 'PROJECT_NOT_FOUND') {
         return reply.status(404).send({ error: 'PROJECT_NOT_FOUND', message: 'Project not found' })
       }
+      const parentError = mapParentError(err)
+      if (parentError) return reply.status(400).send(parentError)
       throw err
     }
   })
@@ -256,7 +273,12 @@ export const issuesRoutes = async (app: FastifyInstance) => {
     }
 
     try {
-      const issue = await issuesService.updateIssue(projectId, issueId, parsed.data, req.user.userId)
+      const actorId = req.user.userId
+      const issue = await issuesService.updateIssue(projectId, issueId, parsed.data, actorId)
+      // Board-visible changes (status/category moves from drag, edits) must
+      // reach other connected boards in real time
+      const actorName = await getActorName(actorId)
+      broadcast(projectId, { type: 'ISSUE_UPDATED', issue, actorId, actorName })
       return reply.status(200).send(issue)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'ISSUE_NOT_FOUND') {
@@ -265,6 +287,8 @@ export const issuesRoutes = async (app: FastifyInstance) => {
       if (err instanceof Error && err.message === 'STATUS_NOT_FOUND') {
         return reply.status(400).send({ error: 'STATUS_NOT_FOUND', message: 'Status does not belong to this project' })
       }
+      const parentError = mapParentError(err)
+      if (parentError) return reply.status(400).send(parentError)
       throw err
     }
   })

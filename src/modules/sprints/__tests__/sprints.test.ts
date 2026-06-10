@@ -9,10 +9,11 @@ import { orgsRoutes } from '../../orgs/orgs.routes.js'
 import { projectsRoutes } from '../../projects/projects.routes.js'
 import { issuesRoutes } from '../../issues/issues.routes.js'
 import { sprintsRoutes } from '../sprints.routes.js'
+import { categoriesRoutes } from '../../categories/categories.routes.js'
 import { handleError } from '../../../middleware/errorHandler.js'
 import { env } from '../../../config/env.js'
 import { db } from '../../../db/index.js'
-import { issues, issueStatuses } from '../../../db/schema.js'
+import { issues, issueStatuses, categories } from '../../../db/schema.js'
 import { eq } from 'drizzle-orm'
 
 // =============================================================================
@@ -48,6 +49,7 @@ const buildTestApp = async () => {
   await app.register(projectsRoutes, { prefix: '/orgs/:slug/projects' })
   await app.register(issuesRoutes,   { prefix: '/orgs/:slug/projects/:projectId/issues' })
   await app.register(sprintsRoutes,  { prefix: '/orgs/:slug/projects/:projectId/sprints' })
+  await app.register(categoriesRoutes, { prefix: '/orgs/:slug/projects/:projectId/categories' })
 
   await app.ready()
   return app
@@ -65,6 +67,7 @@ describe('Sprints API', () => {
   let orgSlug:       string
   let projectId:     string
   let issueId:       string
+  let categoryId:    string   // sprint membership is category-level — issues inherit it
   let defaultStatusId: string
 
   let sprintId:  string   // main sprint: flows planned → active → completed
@@ -106,11 +109,18 @@ describe('Sprints API', () => {
       .orderBy(issueStatuses.position)
     defaultStatusId = statuses[0]!.id
 
-    // 5 — Create an issue to use in sprint-issue tests
+    // 5 — Create a category (categoryId is required on every issue) and an
+    //     issue inside it — sprint membership is driven by the category
+    const categoryRes = await supertest(app.server)
+      .post(`/orgs/${orgSlug}/projects/${projectId}/categories`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ name: 'Sprint Test Category' })
+    categoryId = categoryRes.body.id
+
     const issueRes = await supertest(app.server)
       .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
       .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ title: 'Sprint test issue', statusId: defaultStatusId })
+      .send({ title: 'Sprint test issue', statusId: defaultStatusId, categoryId })
     issueId = issueRes.body.id
 
     // 6 — Register outsider (never joins the org)
@@ -316,15 +326,19 @@ describe('Sprints API', () => {
   })
 
   // ===========================================================================
-  describe('POST /sprints/:sprintId/issues/:issueId', () => {
+  // Sprint membership is category-level: assigning a category to a sprint
+  // cascades sprintId onto all the category's issues.
+  describe('POST /categories/:categoryId/assign-sprint', () => {
 
-    it('should add an issue to the sprint and update its sprintId in DB', async () => {
-      // sprint2Id is still planned — use it for add/remove tests
+    it('should assign the category and cascade sprintId onto its issues', async () => {
+      // sprint2Id is still planned — use it for assign/unassign tests
       const res = await supertest(app.server)
-        .post(`/orgs/${orgSlug}/projects/${projectId}/sprints/${sprint2Id}/issues/${issueId}`)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/categories/${categoryId}/assign-sprint`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ sprintId: sprint2Id })
 
-      expect(res.status).toBe(204)
+      expect(res.status).toBe(200)
+      expect(res.body.sprintId).toBe(sprint2Id)
 
       const [row] = await db
         .select({ sprintId: issues.sprintId })
@@ -335,25 +349,28 @@ describe('Sprints API', () => {
       expect(row?.sprintId).toBe(sprint2Id)
     })
 
-    it('should reject adding an issue to a completed sprint — 400', async () => {
+    it('should reject assigning a category to a completed sprint — 400', async () => {
+      // sprintId was completed in the describe above
       const res = await supertest(app.server)
-        .post(`/orgs/${orgSlug}/projects/${projectId}/sprints/${sprintId}/issues/${issueId}`)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/categories/${categoryId}/assign-sprint`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ sprintId })
 
       expect(res.status).toBe(400)
-      expect(res.body.code).toBe('SPRINT_COMPLETED')
+      expect(res.body.error).toBe('SPRINT_COMPLETED')
     })
   })
 
   // ===========================================================================
-  describe('DELETE /sprints/:sprintId/issues/:issueId', () => {
+  describe('DELETE /categories/:categoryId/assign-sprint', () => {
 
-    it('should remove issue from sprint and set its sprintId to null', async () => {
+    it('should unassign the category and clear sprintId on its issues', async () => {
       const res = await supertest(app.server)
-        .delete(`/orgs/${orgSlug}/projects/${projectId}/sprints/${sprint2Id}/issues/${issueId}`)
+        .delete(`/orgs/${orgSlug}/projects/${projectId}/categories/${categoryId}/assign-sprint`)
         .set('Authorization', `Bearer ${ownerToken}`)
 
-      expect(res.status).toBe(204)
+      expect(res.status).toBe(200)
+      expect(res.body.sprintId).toBeNull()
 
       const [row] = await db
         .select({ sprintId: issues.sprintId })
@@ -388,11 +405,12 @@ describe('Sprints API', () => {
       expect(res.body.code).toBe('SPRINT_ACTIVE')
     })
 
-    it('should delete a planned sprint and move its issues to the backlog', async () => {
-      // Re-add issue to sprint2 so we can verify backlog move on delete
+    it('should delete a planned sprint, unassign its categories and move issues to the backlog', async () => {
+      // Re-assign the category to sprint2 so we can verify backlog move on delete
       await supertest(app.server)
-        .post(`/orgs/${orgSlug}/projects/${projectId}/sprints/${sprint2Id}/issues/${issueId}`)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/categories/${categoryId}/assign-sprint`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ sprintId: sprint2Id })
 
       const res = await supertest(app.server)
         .delete(`/orgs/${orgSlug}/projects/${projectId}/sprints/${sprint2Id}`)
@@ -408,6 +426,15 @@ describe('Sprints API', () => {
         .limit(1)
 
       expect(row?.sprintId).toBeNull()
+
+      // Verify the category itself was unassigned from the deleted sprint
+      const [cat] = await db
+        .select({ sprintId: categories.sprintId })
+        .from(categories)
+        .where(eq(categories.id, categoryId))
+        .limit(1)
+
+      expect(cat?.sprintId).toBeNull()
     })
   })
 
@@ -427,25 +454,30 @@ describe('Sprints API', () => {
       const todo = statusesRes.body.find((s: { category: string }) => s.category === 'todo').id
       const done = statusesRes.body.find((s: { category: string }) => s.category === 'done').id
 
+      const cbCategoryId = (await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${pid}/categories`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ name: 'CB Category' })).body.id
+
       const doneIssue = (await supertest(app.server)
         .post(`/orgs/${orgSlug}/projects/${pid}/issues`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Finished work', statusId: todo })).body.id
+        .send({ title: 'Finished work', statusId: todo, categoryId: cbCategoryId })).body.id
       const openIssue = (await supertest(app.server)
         .post(`/orgs/${orgSlug}/projects/${pid}/issues`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Unfinished work', statusId: todo })).body.id
+        .send({ title: 'Unfinished work', statusId: todo, categoryId: cbCategoryId })).body.id
 
       const sprint = (await supertest(app.server)
         .post(`/orgs/${orgSlug}/projects/${pid}/sprints`)
         .set('Authorization', `Bearer ${ownerToken}`)
         .send({ name: 'CB Sprint' })).body.id
 
-      for (const id of [doneIssue, openIssue]) {
-        await supertest(app.server)
-          .post(`/orgs/${orgSlug}/projects/${pid}/sprints/${sprint}/issues/${id}`)
-          .set('Authorization', `Bearer ${ownerToken}`)
-      }
+      // Assign the category — both issues inherit the sprint via the cascade
+      await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${pid}/categories/${cbCategoryId}/assign-sprint`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ sprintId: sprint })
 
       // Mark one issue done, then start + complete the sprint
       await supertest(app.server)

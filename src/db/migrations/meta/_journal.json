@@ -22,6 +22,27 @@
       "when": 1780681210080,
       "tag": "0002_hard_piledriver",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781025729027,
+      "tag": "0003_remove_ai",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781200000000,
+      "tag": "0004_categories_sprint_simplify",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781120977878,
+      "tag": "0005_striped_vargas",
+      "breakpoints": true
     }
   ]
 }

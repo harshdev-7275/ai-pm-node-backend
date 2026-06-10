@@ -1,14 +1,12 @@
 import { and, eq, isNull, asc, desc } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { issues, projects, issueStatuses, users, issueHistory } from '../../db/schema.js'
-import { emitGraphEvent } from '../../utils/graphEvents.js'
+import { issues, projects, issueStatuses, users, issueHistory, categories } from '../../db/schema.js'
 import type {
   CreateIssueInput,
   UpdateIssueInput,
   UpdateIssueStatusInput,
   IssueResponse,
   IssueDetail,
-  IssueListItem,
   IssueHistoryEntry,
 } from './issues.types.js'
 
@@ -22,7 +20,9 @@ export const createIssue = async (
   orgId:      string,
   reporterId: string,
 ): Promise<IssueResponse> => {
-  // Transaction: read current counter, increment it, insert issue — all atomic
+  await validateParent(projectId, input.parentId ?? null, input.type)
+
+  // Transaction: read current counter + category sprint, insert issue — all atomic
   const result = await db.transaction(async (tx) => {
     const [project] = await tx
       .select({ issueCounter: projects.issueCounter })
@@ -31,6 +31,15 @@ export const createIssue = async (
       .limit(1)
 
     if (!project) throw new Error('PROJECT_NOT_FOUND')
+
+    // Inherit sprintId from the category (if it's assigned to a sprint)
+    const [category] = await tx
+      .select({ sprintId: categories.sprintId })
+      .from(categories)
+      .where(eq(categories.id, input.categoryId))
+      .limit(1)
+
+    if (!category) throw new Error('CATEGORY_NOT_FOUND')
 
     const number = project.issueCounter + 1
 
@@ -48,11 +57,13 @@ export const createIssue = async (
         title:          input.title,
         description:    input.description ?? null,
         type:           input.type,
+        categoryId:     input.categoryId,
         statusId:       input.statusId,
         priority:       input.priority,
         assigneeId:     input.assigneeId ?? null,
         reporterId,
         parentId:       input.parentId ?? null,
+        sprintId:       category.sprintId ?? null,
         storyPoints:    input.storyPoints ?? null,
         estimatedHours: input.estimatedHours ?? null,
         dueDate:        input.dueDate ? new Date(input.dueDate) : null,
@@ -64,8 +75,6 @@ export const createIssue = async (
   })
 
   const response = toResponse(result)
-  // Keep the graph in step with this direct REST write (best-effort, non-blocking).
-  emitGraphEvent('issue', response)
   return response
 }
 
@@ -92,55 +101,6 @@ export const getIssuesByProject = async (
     .offset(offset)
 
   return rows.map(toResponse)
-}
-
-// =============================================================================
-// GET ISSUES BY PROJECT — WITH RELATIONS (status + assignee resolved)
-// =============================================================================
-
-// Like getIssuesByProject, but resolves each issue's status and assignee to
-// their full objects (names, not raw IDs) in a single joined query. Used by the
-// bot/AI list endpoint, which needs human-readable assignee + status to answer
-// questions like "who is assigned to what". The plain getIssuesByProject stays
-// ID-only for the frontend board (it resolves members client-side), so its
-// callers are unaffected.
-export const getIssuesByProjectWithRelations = async (
-  projectId: string,
-  options?: { limit?: number; offset?: number },
-): Promise<IssueListItem[]> => {
-  const limit = options?.limit ?? 100
-  const offset = options?.offset ?? 0
-
-  const rows = await db
-    .select({
-      issue:    issues,
-      status:   issueStatuses,
-      assignee: users,
-    })
-    .from(issues)
-    .innerJoin(issueStatuses, eq(issues.statusId, issueStatuses.id))
-    .leftJoin(users, eq(issues.assigneeId, users.id))
-    .where(and(
-      eq(issues.projectId, projectId),
-      isNull(issues.deletedAt),
-    ))
-    .orderBy(asc(issues.number))
-    .limit(limit)
-    .offset(offset)
-
-  return rows.map((row) => ({
-    ...toResponse(row.issue),
-    status: {
-      id:       row.status.id,
-      name:     row.status.name,
-      color:    row.status.color,
-      position: row.status.position,
-      category: row.status.category,
-    },
-    assignee: row.assignee
-      ? { id: row.assignee.id, name: row.assignee.name, email: row.assignee.email, avatarUrl: row.assignee.avatarUrl ?? null }
-      : null,
-  }))
 }
 
 // =============================================================================
@@ -208,6 +168,7 @@ const HISTORY_FIELD_MAP: Record<
   title:          { dbCol: 'title',           getCurrent: (i) => i.title },
   description:    { dbCol: 'description',     getCurrent: (i) => i.description ?? null },
   type:           { dbCol: 'type',            getCurrent: (i) => i.type },
+  categoryId:     { dbCol: 'category_id',     getCurrent: (i) => i.categoryId },
   statusId:       { dbCol: 'status_id',       getCurrent: (i) => i.statusId },
   priority:       { dbCol: 'priority',        getCurrent: (i) => i.priority },
   assigneeId:     { dbCol: 'assignee_id',     getCurrent: (i) => i.assigneeId ?? null },
@@ -232,11 +193,31 @@ export const updateIssue = async (
 
   if (!current) throw new Error('ISSUE_NOT_FOUND')
 
+  // Re-validate the subtask hierarchy whenever parentId or type is touched —
+  // the effective (post-update) combination must still satisfy the rules.
+  if (input.parentId !== undefined || input.type !== undefined) {
+    const effectiveParentId = input.parentId !== undefined ? input.parentId : (current.parentId ?? null)
+    const effectiveType     = input.type ?? current.type
+    await validateParent(projectId, effectiveParentId, effectiveType)
+  }
+
   // When the status changes, derive startedAt/completedAt from the new status's category.
   const statusTs =
     input.statusId !== undefined && input.statusId !== current.statusId
       ? await computeStatusTimestamps(projectId, input.statusId, current)
       : null
+
+  // When category changes, inherit the new category's sprint assignment
+  let inheritedSprintId: string | null | undefined = undefined
+  if (input.categoryId !== undefined && input.categoryId !== current.categoryId) {
+    const [cat] = await db
+      .select({ sprintId: categories.sprintId })
+      .from(categories)
+      .where(eq(categories.id, input.categoryId))
+      .limit(1)
+    if (!cat) throw new Error('CATEGORY_NOT_FOUND')
+    inheritedSprintId = cat.sprintId ?? null
+  }
 
   const [issue] = await db
     .update(issues)
@@ -244,6 +225,8 @@ export const updateIssue = async (
       ...(input.title          !== undefined && { title: input.title }),
       ...(input.description    !== undefined && { description: input.description }),
       ...(input.type           !== undefined && { type: input.type }),
+      ...(input.categoryId     !== undefined && { categoryId: input.categoryId }),
+      ...(inheritedSprintId    !== undefined && { sprintId: inheritedSprintId }),
       ...(input.statusId       !== undefined && { statusId: input.statusId }),
       ...(statusTs !== null && { startedAt: statusTs.startedAt, completedAt: statusTs.completedAt }),
       ...(input.priority       !== undefined && { priority: input.priority }),
@@ -282,7 +265,6 @@ export const updateIssue = async (
   }
 
   const response = toResponse(issue)
-  emitGraphEvent('issue', response)
   return response
 }
 
@@ -327,7 +309,6 @@ export const updateIssueStatus = async (
   })
 
   const response = toResponse(issue)
-  emitGraphEvent('issue', response)
   return response
 }
 
@@ -336,17 +317,30 @@ export const updateIssueStatus = async (
 // =============================================================================
 
 export const deleteIssue = async (projectId: string, issueId: string): Promise<void> => {
-  const [issue] = await db
-    .update(issues)
-    .set({ deletedAt: new Date() })
-    .where(and(
-      eq(issues.id, issueId),
-      eq(issues.projectId, projectId),
-      isNull(issues.deletedAt),
-    ))
-    .returning({ id: issues.id })
+  await db.transaction(async (tx) => {
+    const now = new Date()
 
-  if (!issue) throw new Error('ISSUE_NOT_FOUND')
+    const [issue] = await tx
+      .update(issues)
+      .set({ deletedAt: now })
+      .where(and(
+        eq(issues.id, issueId),
+        eq(issues.projectId, projectId),
+        isNull(issues.deletedAt),
+      ))
+      .returning({ id: issues.id })
+
+    if (!issue) throw new Error('ISSUE_NOT_FOUND')
+
+    // A subtask cannot outlive its parent — soft-delete children with it
+    await tx
+      .update(issues)
+      .set({ deletedAt: now })
+      .where(and(
+        eq(issues.parentId, issueId),
+        isNull(issues.deletedAt),
+      ))
+  })
 }
 
 // =============================================================================
@@ -403,6 +397,37 @@ export const getIssueHistory = async (projectId: string, issueId: string): Promi
 // =============================================================================
 
 /**
+ * Enforces the subtask hierarchy rules for a (parentId, type) combination:
+ *   - only subtasks may have a parent           → PARENT_NOT_ALLOWED
+ *   - the parent must be an active issue in the
+ *     same project                              → PARENT_NOT_FOUND
+ *   - a subtask cannot itself be a parent (one
+ *     level of nesting only — no cycles)        → PARENT_IS_SUBTASK
+ * A null/absent parentId is always valid.
+ */
+async function validateParent(
+  projectId: string,
+  parentId:  string | null,
+  type:      string,
+): Promise<void> {
+  if (parentId === null) return
+  if (type !== 'subtask') throw new Error('PARENT_NOT_ALLOWED')
+
+  const [parent] = await db
+    .select({ type: issues.type })
+    .from(issues)
+    .where(and(
+      eq(issues.id, parentId),
+      eq(issues.projectId, projectId),
+      isNull(issues.deletedAt),
+    ))
+    .limit(1)
+
+  if (!parent) throw new Error('PARENT_NOT_FOUND')
+  if (parent.type === 'subtask') throw new Error('PARENT_IS_SUBTASK')
+}
+
+/**
  * Derives startedAt/completedAt for an issue moving to `newStatusId`, based on
  * the target status's workflow category:
  *   - in_progress / done → stamp startedAt once (if not already set)
@@ -441,6 +466,7 @@ const toResponse = (i: typeof issues.$inferSelect): IssueResponse => ({
   title:          i.title,
   description:    i.description ?? null,
   type:           i.type,
+  categoryId:     i.categoryId,
   priority:       i.priority,
   statusId:       i.statusId,
   assigneeId:     i.assigneeId ?? null,

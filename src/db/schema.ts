@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, boolean, integer, bigint, timestamp, pgEnum } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, varchar, boolean, integer, timestamp, pgEnum, type AnyPgColumn } from 'drizzle-orm/pg-core'
 
 // =============================================================================
 // ENUMS
@@ -37,15 +37,12 @@ export const projectRoleEnum = pgEnum('project_role', ['lead', 'member', 'viewer
 
 /**
  * Type of a work item (issue).
- * Equivalent to Azure DevOps work item types.
- * - epic:    large body of work, contains stories/features
- * - story:   user-facing feature or requirement
- * - task:    general work item
+ * - feature: user-facing new work
  * - bug:     defect or unexpected behavior
- * - feature: new functionality
- * - subtask: child of any other issue type
+ * - task:    generic internal work (deploy, docs, refactor)
+ * - subtask: child breakdown of a feature, bug, or task
  */
-export const issueTypeEnum = pgEnum('issue_type', ['epic', 'story', 'task', 'bug', 'feature', 'subtask'])
+export const issueTypeEnum = pgEnum('issue_type', ['feature', 'bug', 'task', 'subtask'])
 
 /**
  * Priority level of an issue.
@@ -68,24 +65,6 @@ export const sprintStatusEnum = pgEnum('sprint_status', ['planned', 'active', 'c
  */
 export const statusCategoryEnum = pgEnum('status_category', ['todo', 'in_progress', 'done'])
 
-/**
- * How often a project auto-creates the next sprint when the current one completes.
- * - none:      manual sprint creation only (default)
- * - weekly:    new sprint every 7 days
- * - biweekly:  new sprint every 14 days
- * - monthly:   new sprint every 30 days
- */
-export const cadenceTypeEnum = pgEnum('cadence_type', ['none', 'weekly', 'biweekly', 'monthly'])
-
-/**
- * Type of relationship between two issues.
- * Used in the issue_links table.
- * - blocks:        this issue must be resolved before the target
- * - is_blocked_by: this issue cannot proceed until the target is done
- * - relates_to:    general relationship, no dependency
- * - duplicates:    this issue is a duplicate of the target
- */
-export const issueLinkTypeEnum = pgEnum('issue_link_type', ['blocks', 'is_blocked_by', 'relates_to', 'duplicates'])
 
 /**
  * Data type of a custom field.
@@ -491,42 +470,11 @@ export const projects = pgTable('projects', {
   /** The user who created this project */
   createdBy: uuid('created_by').notNull().references(() => users.id),
 
-  // ---------------------------------------------------------------------------
-  // SPRINT CADENCE — controls auto-creation of the next sprint on completion
-  // ---------------------------------------------------------------------------
-
   /**
-   * Whether and how often the project auto-creates the next sprint.
-   * 'none' = manual only. Set to weekly/biweekly/monthly to enable recurring.
+   * When true, completing a sprint automatically creates the next sprint
+   * starting the same day and ending 7 days later, named "Sprint N".
    */
-  cadenceType: cadenceTypeEnum('cadence_type').default('none').notNull(),
-
-  /**
-   * Day of the week sprints start on (0 = Sunday … 6 = Saturday).
-   * Used to calculate the next sprint's start date.
-   * null when cadenceType is 'none'.
-   */
-  cadenceStartDay: integer('cadence_start_day'),
-
-  /**
-   * Duration of each auto-created sprint in days (7, 14, or 30).
-   * null when cadenceType is 'none'.
-   */
-  cadenceDuration: integer('cadence_duration'),
-
-  /**
-   * When true, completing a sprint automatically creates the next one
-   * according to the cadence settings above.
-   */
-  cadenceAutoCreate: boolean('cadence_auto_create').default(false).notNull(),
-
-  /**
-   * Naming pattern for auto-created sprints.
-   * Supported tokens: {n} = sprint number, {date} = start date (YYYY-MM-DD)
-   * e.g. "Sprint {n}", "Week of {date}"
-   * null = defaults to "Sprint {n}"
-   */
-  cadenceNaming: varchar('cadence_naming', { length: 100 }),
+  weeklyAutoCreate: boolean('weekly_auto_create').default(false).notNull(),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
@@ -594,6 +542,27 @@ export const sprints = pgTable('sprints', {
 // =============================================================================
 
 /**
+ * categories
+ * A named grouping bucket within a project.
+ * Acts as the top-level organiser: issues always belong to a category.
+ * A category can be assigned to a sprint — all its issues inherit that sprintId.
+ */
+export const categories = pgTable('categories', {
+  id:          uuid('id').defaultRandom().primaryKey(),
+  projectId:   uuid('project_id').notNull().references(() => projects.id),
+  orgId:       uuid('org_id').notNull().references(() => organizations.id),
+  name:        varchar('name', { length: 100 }).notNull(),
+  color:       varchar('color', { length: 7 }).notNull().default('#6366f1'),
+  description: varchar('description', { length: 500 }),
+  /** Which sprint this category is currently assigned to. null = backlog. */
+  sprintId:    uuid('sprint_id'),
+  createdBy:   uuid('created_by').notNull().references(() => users.id),
+  createdAt:   timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:   timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
+})
+
+
+/**
  * issue_statuses
  * Custom workflow statuses per project.
  * Unlike priority and type (which are hardcoded enums),
@@ -645,10 +614,9 @@ export const issueStatuses = pgTable('issue_statuses', {
 /**
  * issues
  * The central table of the entire application.
- * Equivalent to Azure DevOps Work Items.
  *
- * An issue can be a task, bug, story, epic, feature, or subtask.
- * Everything else in the app (boards, sprints, AI, Teams bot) reads from this table.
+ * An issue is a feature, bug, task, or subtask — always belonging to a category.
+ * sprintId is derived from its category's sprintId; never set directly.
  */
 export const issues = pgTable('issues', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -681,9 +649,11 @@ export const issues = pgTable('issues', {
    */
   description: varchar('description', { length: 10000 }),
 
+  /** Which category this issue belongs to — required on every issue. */
+  categoryId: uuid('category_id').notNull().references(() => categories.id),
+
   /**
-   * The type/category of this work item.
-   * See issueTypeEnum for full description.
+   * The type of this work item: feature | bug | task | subtask.
    * Affects how the issue is displayed and filtered.
    */
   type: issueTypeEnum('type').default('task').notNull(),
@@ -714,18 +684,16 @@ export const issues = pgTable('issues', {
   reporterId: uuid('reporter_id').notNull().references(() => users.id),
 
   /**
-   * Reference to a parent issue.
-   * Used for subtasks (parentId = the parent task's id)
-   * and for stories under an epic (parentId = the epic's id).
-   * null = this is a top-level issue with no parent.
+   * For subtasks: points to the parent feature/bug/task. null for top-level issues.
+   * Hierarchy rules (only subtasks have parents, parent must be a non-subtask in
+   * the same project) are enforced in issues.service `validateParent`.
+   * ON DELETE CASCADE covers hard deletes; soft deletes cascade in deleteIssue.
    */
-  parentId: uuid('parent_id'),
+  parentId: uuid('parent_id').references((): AnyPgColumn => issues.id, { onDelete: 'cascade' }),
 
   /**
-   * Which sprint this issue is assigned to.
-   * null = issue is in the backlog (not in any sprint).
-   * References sprints table (added in Layer 4).
-   * Left as plain uuid for now to avoid circular dependency.
+   * Derived from the parent category's sprintId — do not set directly.
+   * null = issue is in the backlog. Set by assignCategoryToSprint cascade.
    */
   sprintId: uuid('sprint_id'),
 
@@ -922,35 +890,6 @@ export const issueWatchers = pgTable('issue_watchers', {
 
 
 /**
- * issue_links
- * Defines relationships between two issues.
- * Used to model dependencies, duplicates, and related work.
- *
- * Example: "WEB-42 blocks WEB-50" means WEB-50 cannot be started until WEB-42 is done.
- * The AI uses this table to detect blocker chains and calculate impact of delays.
- */
-export const issueLinks = pgTable('issue_links', {
-  id: uuid('id').defaultRandom().primaryKey(),
-
-  /** The issue that is the source of the relationship */
-  sourceIssueId: uuid('source_issue_id').notNull().references(() => issues.id),
-
-  /** The issue that is the target of the relationship */
-  targetIssueId: uuid('target_issue_id').notNull().references(() => issues.id),
-
-  /**
-   * The type of relationship between the two issues.
-   * See issueLinkTypeEnum for full description.
-   * Note: "blocks" and "is_blocked_by" are inverse relationships.
-   * When you create "A blocks B", also create "B is_blocked_by A".
-   */
-  linkType: issueLinkTypeEnum('link_type').notNull(),
-
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
-
-
-/**
  * issue_history
  * Complete audit trail of every change made to an issue.
  * One row is inserted for every field that changes.
@@ -1085,479 +1024,3 @@ export const customFieldValues = pgTable('custom_field_values', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
-
-
-/**
- * user_expertise
- * Cached expertise scores per user per topic.
- * Built automatically by the AI from user activity:
- * - commits to files tagged with a topic
- * - issues closed in a topic area
- * - PRs reviewed in a topic area
- * - comments written on topic-related issues
- *
- * Higher score = more expertise in that topic.
- * Used by AI to suggest the best assignee for new issues.
- * Recalculated periodically by a background job.
- */
-export const userExpertise = pgTable('user_expertise', {
-  id:        uuid('id').defaultRandom().primaryKey(),
-
-  /** Which user has this expertise */
-  userId:    uuid('user_id').notNull().references(() => users.id),
-
-  /** Which org this expertise is tracked within */
-  orgId:     uuid('org_id').notNull().references(() => organizations.id),
-
-  /**
-   * The topic/area of expertise.
-   * Derived from issue labels, PR file paths, and issue types.
-   * e.g. "authentication", "payments", "frontend", "database", "devops"
-   */
-  topic:     varchar('topic', { length: 100 }).notNull(),
-
-  /**
-   * Expertise score from 0.0 to 100.0
-   * Calculated from weighted activity:
-   * - Closed bug in topic = +5
-   * - Merged PR touching topic files = +3
-   * - Reviewed PR in topic = +2
-   * - Commented on topic issue = +1
-   * Decays over time if no recent activity.
-   */
-  score:     integer('score').default(0).notNull(),
-
-  /** When this score was last recalculated */
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
-})
-
-
-/**
- * kg_sync_log
- * Tracks what has been synced from PostgreSQL to Neo4j.
- * Every time a user, issue, or project changes in PostgreSQL,
- * a background job syncs the change to the knowledge graph.
- *
- * This table ensures nothing is missed — if Neo4j goes down,
- * we can resync everything that failed using this log.
- */
-export const kgSyncLog = pgTable('kg_sync_log', {
-  id:         uuid('id').defaultRandom().primaryKey(),
-
-  /**
-   * What type of entity was synced.
-   * e.g. "user", "issue", "project", "organization", "issue_link"
-   */
-  entityType: varchar('entity_type', { length: 50 }).notNull(),
-
-  /** The PostgreSQL UUID of the entity that was synced */
-  entityId:   uuid('entity_id').notNull(),
-
-  /**
-   * What operation was performed in Neo4j.
-   * - create: new node/relationship created
-   * - update: existing node/relationship updated
-   * - delete: node/relationship removed
-   */
-  operation:  varchar('operation', { length: 20 }).notNull(),
-
-  /**
-   * Whether the sync succeeded.
-   * - success: synced to Neo4j successfully
-   * - failed:  sync failed, will be retried
-   * - pending: queued but not yet processed
-   */
-  status:     varchar('status', { length: 20 }).default('pending').notNull(),
-
-  /** Error message if sync failed — used for debugging */
-  errorMsg:   varchar('error_msg', { length: 1000 }),
-
-  /** How many times sync has been attempted (for retry logic) */
-  attempts:   integer('attempts').default(0).notNull(),
-
-  /** When the sync was successfully completed */
-  syncedAt:   timestamp('synced_at', { withTimezone: true }),
-
-  createdAt:  timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
-
-
-/**
- * org_usage
- * Per-organization LLM metering counters — the source of truth for
- * cross-instance token + request accounting.
- *
- * The Python AI service (METERING_BACKEND=postgres) calls the node-api's
- * /admin/metering/* routes, which read and increment this table. Keeping the
- * counters in Postgres (not in-process) means multiple ai-service instances
- * see the same numbers and a deploy does not reset the quota.
- *
- * Keyed by org slug (not org UUID) because the AI service identifies tenants
- * by slug throughout the chat pipeline — it never sees the internal UUID.
- */
-export const orgUsage = pgTable('org_usage', {
-  id: uuid('id').defaultRandom().primaryKey(),
-
-  /** Org slug — the tenant key the AI service meters against. One row per org. */
-  orgSlug: varchar('org_slug', { length: 100 }).notNull().unique(),
-
-  /**
-   * Cumulative LLM tokens consumed by this org across all chat requests.
-   * bigint because a busy org can exceed 2^31 tokens over its lifetime.
-   * mode:'number' keeps it as a JS number (safe well past any real usage).
-   */
-  tokens: bigint('tokens', { mode: 'number' }).default(0).notNull(),
-
-  /** Cumulative number of chat requests this org has made. */
-  requests: integer('requests').default(0).notNull(),
-
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
-})
-
-
-/**
- * ai_insights
- * AI-generated insights about projects and teams.
- * Generated by the Python AI service by traversing the knowledge graph.
- * Displayed in dashboards, reports, and the Teams bot.
- *
- * Examples:
- * - "Sprint 3 is at 60% risk of not completing on time"
- * - "John has been overloaded for 2 weeks — 8 open tasks"
- * - "The authentication module has had 5 bugs in 30 days — needs refactoring"
- */
-export const aiInsights = pgTable('ai_insights', {
-  id:          uuid('id').defaultRandom().primaryKey(),
-
-  /** Which org this insight belongs to */
-  orgId:       uuid('org_id').notNull().references(() => organizations.id),
-
-  /**
-   * Which project this insight is about.
-   * null = org-wide insight (e.g. team performance across all projects)
-   */
-  projectId:   uuid('project_id').references(() => projects.id),
-
-  /**
-   * Category of insight — used for filtering and icons in UI.
-   * e.g. "bottleneck", "velocity_drop", "overload", "risk", "duplicate_pattern"
-   */
-  type:        varchar('type', { length: 100 }).notNull(),
-
-  /** Short title shown in the dashboard e.g. "Sprint at risk" */
-  title:       varchar('title', { length: 255 }).notNull(),
-
-  /**
-   * Full explanation of the insight in plain English.
-   * Written by the AI — should be actionable, not just descriptive.
-   * e.g. "Sprint 3 has 12 open tasks but only 4 days remaining.
-   *       Based on current velocity, only 7 tasks will complete."
-   */
-  body:        varchar('body', { length: 2000 }).notNull(),
-
-  /**
-   * How important this insight is.
-   * - info:     informational, no action needed
-   * - warning:  should be looked at soon
-   * - critical: needs immediate attention
-   */
-  severity:    varchar('severity', { length: 20 }).default('info').notNull(),
-
-  /**
-   * Whether a user has dismissed this insight.
-   * Dismissed insights are hidden from the dashboard.
-   * null = not dismissed, shown to user.
-   */
-  isDismissed: boolean('is_dismissed').default(false).notNull(),
-
-  createdAt:   timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
-
-
-/**
- * ai_suggestions
- * Specific AI recommendations on entities (issues, sprints, PRs).
- * More targeted than insights — these suggest a concrete action.
- *
- * Examples:
- * - "Assign this issue to Sarah (confidence: 87%)"
- * - "This issue looks like a duplicate of WEB-23"
- * - "This PR has a potential SQL injection vulnerability"
- */
-export const aiSuggestions = pgTable('ai_suggestions', {
-  id:             uuid('id').defaultRandom().primaryKey(),
-
-  /** Which org this suggestion belongs to */
-  orgId:          uuid('org_id').notNull().references(() => organizations.id),
-
-  /**
-   * What type of entity this suggestion is about.
-   * e.g. "issue", "pr", "sprint", "pipeline"
-   */
-  entityType:     varchar('entity_type', { length: 50 }).notNull(),
-
-  /** The UUID of the entity this suggestion is about */
-  entityId:       uuid('entity_id').notNull(),
-
-  /**
-   * What kind of suggestion this is.
-   * e.g. "assignee", "duplicate", "priority", "effort", "security", "review"
-   */
-  type:           varchar('type', { length: 100 }).notNull(),
-
-  /**
-   * The actual suggestion as a JSON object.
-   * Structure depends on type:
-   * assignee:   { userId: "uuid", reason: "fixed 3 similar bugs" }
-   * duplicate:  { issueId: "uuid", similarity: 0.92 }
-   * priority:   { suggested: "high", reason: "affects login flow" }
-   */
-  suggestion:     varchar('suggestion', { length: 2000 }).notNull(),
-
-  /**
-   * How confident the AI is in this suggestion (0.0 to 1.0).
-   * e.g. 0.87 = 87% confidence
-   * Shown to users as a percentage.
-   * Suggestions below 0.6 are typically not shown.
-   */
-  confidenceScore: integer('confidence_score').notNull(),
-
-  /**
-   * Whether the user accepted this suggestion.
-   * null      = not yet acted on
-   * true      = user accepted the suggestion
-   * false     = user rejected the suggestion
-   * Used to improve AI accuracy over time.
-   */
-  wasAccepted:    boolean('was_accepted'),
-
-  createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
-
-
-
-
-/**
- * teams_configs
- * Stores Microsoft Teams connection per org.
- * One org can connect MULTIPLE Teams workspaces.
- * e.g. Acme Healthcare connects both their main tenant
- * and their IT department's separate Teams tenant.
- *
- * Created when an org admin clicks "Connect Teams" and
- * completes the Microsoft OAuth flow.
- */
-export const teamsConfigs = pgTable('teams_configs', {
-  id:           uuid('id').defaultRandom().primaryKey(),
-
-  /** Which org owns this Teams connection */
-  orgId:        uuid('org_id').notNull().references(() => organizations.id),
-
-  /**
-   * Microsoft Teams tenant ID (from Azure AD).
-   * Uniquely identifies the Microsoft 365 organization.
-   * Found in Azure Portal → Azure AD → Tenant ID.
-   */
-  tenantId:     varchar('tenant_id', { length: 255 }).notNull(),
-
-  /**
-   * Display name of the Teams workspace.
-   * e.g. "Acme Healthcare - Main", "Acme IT Department"
-   * Helps admins identify which workspace is which.
-   */
-  workspaceName: varchar('workspace_name', { length: 255 }).notNull(),
-
-  /**
-   * OAuth access token for calling Microsoft Graph API
-   * on behalf of this Teams workspace.
-   * Used to send messages, read channels, get user presence.
-   * Expires and must be refreshed using refreshToken.
-   */
-  accessToken:  varchar('access_token', { length: 2000 }),
-
-  /**
-   * OAuth refresh token — used to get new access token
-   * when current one expires.
-   * Store securely — treat like a password.
-   */
-  refreshToken: varchar('refresh_token', { length: 2000 }),
-
-  /** When the access token expires */
-  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
-
-  /**
-   * Microsoft App ID registered in Azure Portal.
-   * The bot uses this to authenticate with Teams.
-   */
-  botAppId:     varchar('bot_app_id', { length: 255 }),
-
-  /**
-   * Whether this Teams connection is active.
-   * false = disconnected by admin or token revoked.
-   */
-  isActive:     boolean('is_active').default(true).notNull(),
-
-  createdAt:    timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt:    timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
-})
-
-
-/**
- * teams_channel_links
- * Links a Microsoft Teams channel to a project in your app.
- * Controls which Teams channel receives notifications for which project.
- *
- * Example:
- * Teams channel #engineering → Project "Website Revamp"
- * Teams channel #mobile-team → Project "Mobile App v2"
- *
- * When an issue is created/updated in "Website Revamp",
- * a notification is sent to #engineering in Teams.
- */
-export const teamsChannelLinks = pgTable('teams_channel_links', {
-  id:               uuid('id').defaultRandom().primaryKey(),
-
-  /** Which org this link belongs to */
-  orgId:            uuid('org_id').notNull().references(() => organizations.id),
-
-  /** Which Teams workspace this channel is in */
-  teamsConfigId:    uuid('teams_config_id').notNull().references(() => teamsConfigs.id),
-
-  /** Which project notifications come from */
-  projectId:        uuid('project_id').notNull().references(() => projects.id),
-
-  /**
-   * Microsoft Teams channel ID.
-   * Format: "19:abc123@thread.tacv2"
-   * Used by Graph API to send messages to this channel.
-   */
-  teamsChannelId:   varchar('teams_channel_id', { length: 255 }).notNull(),
-
-  /** Human-readable channel name e.g. "#engineering" */
-  teamsChannelName: varchar('teams_channel_name', { length: 255 }).notNull(),
-
-  /**
-   * Which events trigger a notification to this channel.
-   * Stored as JSON array of event types.
-   * e.g. '["issue_created", "issue_closed", "build_failed", "pr_merged"]'
-   *
-   * Available events:
-   * - issue_created, issue_closed, issue_assigned
-   * - pr_created, pr_merged, pr_review_requested
-   * - build_failed, build_succeeded
-   * - sprint_started, sprint_completed
-   * - blocker_detected
-   */
-  notifyOn:         varchar('notify_on', { length: 1000 }).default('["issue_created"]').notNull(),
-
-  isActive:         boolean('is_active').default(true).notNull(),
-  createdAt:        timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
-
-
-/**
- * standup_sessions
- * Configures scheduled daily standup for a project via Teams bot.
- * When active, the bot DMs each project member at the scheduled time
- * asking their 3 standup questions, then posts a summary to the channel.
- *
- * One project can have one active standup session.
- */
-export const standupSessions = pgTable('standup_sessions', {
-  id:             uuid('id').defaultRandom().primaryKey(),
-
-  /** Which org this standup belongs to */
-  orgId:          uuid('org_id').notNull().references(() => organizations.id),
-
-  /** Which project this standup is for */
-  projectId:      uuid('project_id').notNull().references(() => projects.id),
-
-  /** Which Teams channel the standup summary is posted to */
-  teamsChannelId: uuid('teams_channel_id').references(() => teamsChannelLinks.id),
-
-  /**
-   * Time to send standup DMs (24hr format HH:MM).
-   * e.g. "09:00" = bot messages team at 9am
-   * Interpreted in the org's timezone.
-   */
-  scheduledTime:  varchar('scheduled_time', { length: 5 }).notNull(),
-
-  /**
-   * Timezone for the scheduled time (IANA format).
-   * e.g. "Asia/Kolkata", "America/New_York"
-   * Defaults to the org creator's timezone.
-   */
-  timezone:       varchar('timezone', { length: 100 }).default('UTC').notNull(),
-
-  /**
-   * Which days of the week to run the standup.
-   * Stored as JSON array of day names.
-   * e.g. '["monday","tuesday","wednesday","thursday","friday"]'
-   * Weekend standups are unusual but supported.
-   */
-  days:           varchar('days', { length: 200 }).default('["monday","tuesday","wednesday","thursday","friday"]').notNull(),
-
-  /**
-   * Whether this standup is currently active.
-   * false = paused (e.g. during holidays or sprint break).
-   */
-  isActive:       boolean('is_active').default(true).notNull(),
-
-  createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt:      timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
-})
-
-
-/**
- * standup_responses
- * Individual standup answers collected from each team member.
- * One row per person per day.
- *
- * The bot DMs each person, waits for their reply,
- * then stores it here before compiling the team summary.
- *
- * If a person doesn't respond within the window (e.g. 30 mins),
- * their row has null values and is marked as such in the summary.
- */
-export const standupResponses = pgTable('standup_responses', {
-  id:           uuid('id').defaultRandom().primaryKey(),
-
-  /** Which standup session this response belongs to */
-  sessionId:    uuid('session_id').notNull().references(() => standupSessions.id),
-
-  /** Which user submitted this response */
-  userId:       uuid('user_id').notNull().references(() => users.id),
-
-  /**
-   * The date of this standup (not datetime — one per day per user).
-   * Stored as ISO date string e.g. "2026-05-29"
-   */
-  date:         varchar('date', { length: 10 }).notNull(),
-
-  /**
-   * Answer to: "What did you complete yesterday?"
-   * null = user did not respond
-   */
-  didYesterday: varchar('did_yesterday', { length: 2000 }),
-
-  /**
-   * Answer to: "What are you working on today?"
-   * null = user did not respond
-   */
-  doingToday:   varchar('doing_today', { length: 2000 }),
-
-  /**
-   * Answer to: "Any blockers or impediments?"
-   * null = user did not respond or has no blockers
-   */
-  blockers:     varchar('blockers', { length: 2000 }),
-
-  /**
-   * When the user submitted their standup.
-   * null = user has not responded yet (DM sent but no reply)
-   */
-  submittedAt:  timestamp('submitted_at', { withTimezone: true }),
-
-  createdAt:    timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})

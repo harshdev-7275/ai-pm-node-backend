@@ -9,10 +9,11 @@ import { orgsRoutes } from '../../orgs/orgs.routes.js'
 import { projectsRoutes } from '../../projects/projects.routes.js'
 import { issuesRoutes } from '../issues.routes.js'
 import { statusesRoutes } from '../statuses.routes.js'
+import { categoriesRoutes } from '../../categories/categories.routes.js'
 import { env } from '../../../config/env.js'
 import { db } from '../../../db/index.js'
-import { issueStatuses, organizationMembers, projects } from '../../../db/schema.js'
-import { eq, and } from 'drizzle-orm'
+import { issueStatuses, organizationMembers } from '../../../db/schema.js'
+import { eq } from 'drizzle-orm'
 
 // =============================================================================
 // TEST APP SETUP
@@ -41,6 +42,7 @@ const buildTestApp = async () => {
   // Issues needed for the "status has issues" delete safety check
   await app.register(issuesRoutes, { prefix: '/orgs/:slug/projects/:projectId/issues' })
   await app.register(statusesRoutes, { prefix: '/orgs/:slug/projects/:projectId/statuses' })
+  await app.register(categoriesRoutes, { prefix: '/orgs/:slug/projects/:projectId/categories' })
 
   await app.ready()
   return app
@@ -319,11 +321,17 @@ describe('Statuses API', () => {
     })
 
     it('returns 409 when issues are assigned to the status', async () => {
-      // Create an issue assigned to todoStatusId, then try to delete that status
+      // Create an issue assigned to todoStatusId, then try to delete that status.
+      // categoryId is required on every issue since the category restructure.
+      const categoryRes = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/categories`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ name: 'General' })
+
       const issueRes = await supertest(app.server)
         .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
         .set('Authorization', `Bearer ${ownerToken}`)
-        .send({ title: 'Blocking issue', statusId: todoStatusId })
+        .send({ title: 'Blocking issue', statusId: todoStatusId, categoryId: categoryRes.body.id })
 
       expect(issueRes.status).toBe(201)
 

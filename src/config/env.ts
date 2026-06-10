@@ -11,18 +11,17 @@ const EnvSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'), // comma-separated for multiple origins
   API_URL: z.string().default('https://api.example.com'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-  BOT_SECRET:       z.string().min(16, 'BOT_SECRET must be at least 16 characters'),
-  INTERNAL_SECRET:  z.string().min(32, 'INTERNAL_SECRET must be at least 32 characters'),
-  AI_SERVICE_URL:   z.string().url().default('http://localhost:8000'),
 })
 
 const parsed = EnvSchema.safeParse(process.env)
 
 if (!parsed.success) {
+  /* eslint-disable no-console -- fail-fast path: the Pino logger depends on env, so it does not exist yet */
   console.error('Invalid environment variables:')
   parsed.error.issues.forEach((issue) => {
     console.error(`  ${issue.path.join('.')} — ${issue.message}`)
   })
+  /* eslint-enable no-console */
   process.exit(1)
 }
 

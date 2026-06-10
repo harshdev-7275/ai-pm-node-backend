@@ -10,6 +10,7 @@ import { projectsRoutes } from '../../modules/projects/projects.routes.js'
 import { issuesRoutes } from '../../modules/issues/issues.routes.js'
 import { commentsRoutes } from '../../modules/issues/comments.routes.js'
 import { sprintsRoutes } from '../../modules/sprints/sprints.routes.js'
+import { categoriesRoutes } from '../../modules/categories/categories.routes.js'
 import { handleError } from '../errorHandler.js'
 import { env } from '../../config/env.js'
 
@@ -47,6 +48,7 @@ const buildTestApp = async () => {
   await app.register(issuesRoutes,   { prefix: '/orgs/:slug/projects/:projectId/issues' })
   await app.register(commentsRoutes, { prefix: '/orgs/:slug/projects/:projectId/issues' })
   await app.register(sprintsRoutes,  { prefix: '/orgs/:slug/projects/:projectId/sprints' })
+  await app.register(categoriesRoutes, { prefix: '/orgs/:slug/projects/:projectId/categories' })
 
   await app.ready()
   return app
@@ -80,16 +82,15 @@ describe('requireProjectAccess — project-role enforcement', () => {
   const ts = Date.now()
 
   let ownerToken:    string
-  let ownerUserId:   string
   let viewerToken:   string
   let viewerUserId:  string
   let memberToken:   string
   let memberUserId:  string
   let strangerToken:  string  // org member, NOT added to the project
-  let strangerUserId: string
   let orgSlug:       string
   let projectId:     string
   let statusId:      string
+  let categoryId:    string
 
   // Second org, used to prove cross-org isolation
   let foreignProjectId: string
@@ -99,7 +100,6 @@ describe('requireProjectAccess — project-role enforcement', () => {
 
     const owner = await register(app, 'PA Owner', `pa_owner_${ts}@test.com`)
     ownerToken  = owner.token
-    ownerUserId = owner.userId
 
     const orgRes = await supertest(app.server)
       .post('/orgs')
@@ -117,6 +117,13 @@ describe('requireProjectAccess — project-role enforcement', () => {
       .get(`/orgs/${orgSlug}/projects/${projectId}/issues/statuses`)
       .set('Authorization', `Bearer ${ownerToken}`)
     statusId = statusesRes.body[0].id
+
+    // categoryId is required on every issue since the category restructure
+    const categoryRes = await supertest(app.server)
+      .post(`/orgs/${orgSlug}/projects/${projectId}/categories`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ name: 'General' })
+    categoryId = categoryRes.body.id
 
     // viewer: org member added to the project as project 'viewer'
     const viewer = await register(app, 'PA Viewer', `pa_viewer_${ts}@test.com`)
@@ -141,7 +148,6 @@ describe('requireProjectAccess — project-role enforcement', () => {
     // stranger: org member but NOT added to the project
     const stranger = await register(app, 'PA Stranger', `pa_stranger_${ts}@test.com`)
     strangerToken  = stranger.token
-    strangerUserId = stranger.userId
     await joinOrg(app, orgSlug, ownerToken, `pa_stranger_${ts}@test.com`, strangerToken)
 
     // Second org with its own project (different tenant)
@@ -165,7 +171,7 @@ describe('requireProjectAccess — project-role enforcement', () => {
     supertest(app.server)
       .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ title: 'Test issue', statusId, type: 'task', priority: 'medium' })
+      .send({ title: 'Test issue', statusId, categoryId, type: 'task', priority: 'medium' })
 
   // --- read access -----------------------------------------------------------
 
@@ -226,103 +232,4 @@ describe('requireProjectAccess — project-role enforcement', () => {
     expect(res.body.error).toBe('PROJECT_NOT_FOUND')
   })
 
-  // ===========================================================================
-  // BOT PATH — the AI service authenticates with X-Bot-Secret and acts on
-  // behalf of the user in X-Bot-User-Id. The bot secret authenticates the
-  // SERVICE; it must NOT grant blanket 'lead'. The acting user's real project
-  // access governs what the bot may do.
-  // ===========================================================================
-
-  describe('bot path — authorizes as the acting user, not blanket lead', () => {
-    const createIssueAsBot = (botUserId?: string) => {
-      const r = supertest(app.server)
-        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
-        .set('X-Bot-Secret', env.BOT_SECRET)
-        .send({ title: 'Bot issue', statusId, type: 'task', priority: 'medium' })
-      return botUserId ? r.set('X-Bot-User-Id', botUserId) : r
-    }
-
-    it('rejects an invalid bot secret — 401', async () => {
-      const res = await supertest(app.server)
-        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
-        .set('X-Bot-Secret', 'not-the-real-secret')
-        .set('X-Bot-User-Id', memberUserId)
-        .send({ title: 'Bot issue', statusId, type: 'task', priority: 'medium' })
-      expect(res.status).toBe(401)
-    })
-
-    it('rejects a bot write with NO acting user — 403', async () => {
-      const res = await createIssueAsBot()
-      expect(res.status).toBe(403)
-      expect(res.body.error).toBe('FORBIDDEN')
-    })
-
-    it('bot acting as a project VIEWER CANNOT create an issue — 403', async () => {
-      const res = await createIssueAsBot(viewerUserId)
-      expect(res.status).toBe(403)
-      expect(res.body.error).toBe('FORBIDDEN')
-    })
-
-    it('bot acting as an org member NOT on the project CANNOT create — 403', async () => {
-      const res = await createIssueAsBot(strangerUserId)
-      expect(res.status).toBe(403)
-      expect(res.body.error).toBe('FORBIDDEN')
-    })
-
-    it('bot acting as a project MEMBER CAN create an issue — 201', async () => {
-      const res = await createIssueAsBot(memberUserId)
-      expect(res.status).toBe(201)
-      expect(res.body.id).toBeDefined()
-    })
-
-    it('bot acting as an org OWNER (resolves to lead) CAN create an issue — 201', async () => {
-      const res = await createIssueAsBot(ownerUserId)
-      expect(res.status).toBe(201)
-    })
-
-    it('bot acting as a project VIEWER CAN still read issues — 200', async () => {
-      const res = await supertest(app.server)
-        .get(`/orgs/${orgSlug}/projects/${projectId}/issues`)
-        .set('X-Bot-Secret', env.BOT_SECRET)
-        .set('X-Bot-User-Id', viewerUserId)
-      expect(res.status).toBe(200)
-    })
-
-    // --- regression: bot path must synthesize req.user so PATCH works -------
-    // The pre-fix bug: PATCH /issues/:id accessed req.user.userId directly
-    // (no req.isBot fallback), so every bot-originated PATCH crashed with
-    // "Cannot read properties of null (reading 'userId')" — surfaced by
-    // the AI assistant's "assign all open issues to Ranu" bulk call.
-    it('bot acting as a project MEMBER CAN update an issue — 200', async () => {
-      // Create an issue first (as the bot acting as member — already covered above)
-      const create = await createIssueAsBot(memberUserId)
-      expect(create.status).toBe(201)
-      const issueId = create.body.id as string
-
-      // PATCH it as the bot — this used to 500
-      const res = await supertest(app.server)
-        .patch(`/orgs/${orgSlug}/projects/${projectId}/issues/${issueId}`)
-        .set('X-Bot-Secret', env.BOT_SECRET)
-        .set('X-Bot-User-Id', memberUserId)
-        .send({ priority: 'high' })
-
-      expect(res.status).toBe(200)
-      expect(res.body.priority).toBe('high')
-    })
-
-    it('bot acting as a project MEMBER CAN add a comment — 201', async () => {
-      // Same family of bug — POST /:issueId/comments used to crash for the
-      // same reason. Locked in here so a future refactor can't regress it.
-      const create = await createIssueAsBot(memberUserId)
-      const issueId = create.body.id as string
-
-      const res = await supertest(app.server)
-        .post(`/orgs/${orgSlug}/projects/${projectId}/issues/${issueId}/comments`)
-        .set('X-Bot-Secret', env.BOT_SECRET)
-        .set('X-Bot-User-Id', memberUserId)
-        .send({ body: 'bot comment' })
-
-      expect(res.status).toBe(201)
-    })
-  })
 })

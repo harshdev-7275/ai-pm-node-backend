@@ -1,12 +1,13 @@
 import { z } from 'zod'
 
-const issueType     = z.enum(['epic', 'story', 'task', 'bug', 'feature', 'subtask'])
+const issueType     = z.enum(['feature', 'bug', 'task', 'subtask'])
 const issuePriority = z.enum(['critical', 'high', 'medium', 'low'])
 
 export const createIssueSchema = z.object({
   title:          z.string().min(1, 'Title is required').max(500),
   description:    z.string().max(10000).optional(),
   type:           issueType.default('task'),
+  categoryId:     z.string().uuid('Invalid category ID'),
   statusId:       z.uuid('Invalid status ID'),
   priority:       issuePriority.default('medium'),
   assigneeId:     z.uuid('Invalid assignee ID').optional(),
@@ -20,6 +21,7 @@ export const updateIssueSchema = z.object({
   title:          z.string().min(1).max(500).optional(),
   description:    z.string().max(10000).optional(),
   type:           issueType.optional(),
+  categoryId:     z.string().uuid('Invalid category ID').optional(),
   statusId:       z.uuid('Invalid status ID').optional(),
   priority:       issuePriority.optional(),
   assigneeId:     z.uuid('Invalid assignee ID').nullable().optional(),

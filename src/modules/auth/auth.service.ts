@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+import jwt, { type SignOptions } from 'jsonwebtoken'
 import { eq } from 'drizzle-orm'
 import { db } from '../../db/index.js'
 import { users, userAuth, refreshTokens } from '../../db/schema.js'
@@ -17,7 +17,9 @@ export const generateAccessToken = (payload: TokenPayload): string => {
     payload,
     env.JWT_SECRET,
     {
-      expiresIn: env.JWT_EXPIRES_IN as any,
+      // Boundary cast: env.JWT_EXPIRES_IN is a Zod-validated string ("15m"),
+      // jsonwebtoken types it as the narrower ms.StringValue template type
+      expiresIn: env.JWT_EXPIRES_IN as NonNullable<SignOptions['expiresIn']>,
     }
   )
 }

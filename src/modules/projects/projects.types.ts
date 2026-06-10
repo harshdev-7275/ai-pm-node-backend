@@ -21,21 +21,17 @@ export interface ProjectMember {
 }
 
 export interface ProjectResponse {
-  id:                string
-  orgId:             string
-  name:              string
-  key:               string
-  description:       string | null
-  icon:              string | null
-  color:             string | null
-  isArchived:        boolean
-  createdBy:         string
-  createdAt:         string
-  cadenceType:       'none' | 'weekly' | 'biweekly' | 'monthly'
-  cadenceStartDay:   number | null
-  cadenceDuration:   number | null
-  cadenceAutoCreate: boolean
-  cadenceNaming:     string | null
+  id:               string
+  orgId:            string
+  name:             string
+  key:              string
+  description:      string | null
+  icon:             string | null
+  color:            string | null
+  isArchived:       boolean
+  createdBy:        string
+  createdAt:        string
+  weeklyAutoCreate: boolean
 }
 
 export interface ProjectDetail extends ProjectResponse {

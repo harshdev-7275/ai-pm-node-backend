@@ -2,7 +2,6 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { organizations, organizationMembers, projects, projectMembers } from '../db/schema.js'
-import { env } from '../config/env.js'
 import { resolveProjectAccess, meetsAccess, type AccessLevel } from '../utils/permissions.js'
 
 /**
@@ -15,66 +14,11 @@ import { resolveProjectAccess, meetsAccess, type AccessLevel } from '../utils/pe
  *   4. effective-access resolution (org role + project role) vs `minRole`
  *
  * On success it attaches req.org, req.membership and req.projectRole.
- *
- * The AI service may call via a valid X-Bot-Secret header. That secret only
- * authenticates the SERVICE — it does NOT grant access. The bot must identify
- * the acting user via X-Bot-User-Id, and the action is authorized against that
- * user's real effective access, exactly as if they had called it themselves.
  */
 export function requireProjectAccess(minRole: AccessLevel) {
   return async function projectAccessGuard(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const { slug, projectId } = req.params as { slug: string; projectId: string }
 
-    // --- Bot path: secret authenticates the service; the action is authorized
-    //     as the acting user (X-Bot-User-Id) — never blanket 'lead'. ----------
-    const botSecret = req.headers['x-bot-secret']
-    if (botSecret) {
-      if (botSecret !== env.BOT_SECRET) {
-        reply.status(401).send({ error: 'UNAUTHORIZED', message: 'Invalid bot secret' })
-        return
-      }
-
-      const botUserId = req.headers['x-bot-user-id'] as string | undefined
-      if (!botUserId) {
-        reply.status(403).send({ error: 'FORBIDDEN', message: 'Bot calls must identify the acting user' })
-        return
-      }
-
-      const org = await loadOrg(slug)
-      if (!org) {
-        reply.status(404).send({ error: 'ORG_NOT_FOUND', message: 'Organization not found' })
-        return
-      }
-      if (!(await projectBelongsToOrg(projectId, org.id))) {
-        reply.status(404).send({ error: 'PROJECT_NOT_FOUND', message: 'Project not found' })
-        return
-      }
-
-      const { access } = await resolveEffectiveAccess(org.id, projectId, botUserId)
-      if (access === null || !meetsAccess(access, minRole)) {
-        reply.status(403).send({ error: 'FORBIDDEN', message: `This action requires project ${minRole} access` })
-        return
-      }
-
-      req.org         = org
-      req.isBot       = true
-      req.botUserId   = botUserId
-      req.projectRole = access
-      // Synthesize req.user so downstream handlers can use the uniform
-      // `req.user.userId` access pattern. Without this, every bot-originated
-      // write (PATCH, comment-create, etc.) that uses `req.user.userId`
-      // directly crashes with "Cannot read properties of null (reading
-      // 'userId')" — see the regression tests in
-      // middleware/__tests__/requireProjectAccess.test.ts.
-      //
-      // Only userId is set. Routes that read email/sessionId are user-only
-      // and TypeScript now flags them as accessing optional fields
-      // (see AuthUser in types/fastify.d.ts).
-      req.user        = { userId: botUserId }
-      return
-    }
-
-    // --- User path -----------------------------------------------------------
     try {
       await req.jwtVerify()
     } catch {
@@ -107,8 +51,6 @@ export function requireProjectAccess(minRole: AccessLevel) {
     req.org         = org
     req.membership  = membership
     req.projectRole = access
-    req.isBot       = false
-    req.botUserId   = undefined
   }
 }
 

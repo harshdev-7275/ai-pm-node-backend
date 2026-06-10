@@ -1,8 +1,7 @@
 import { and, eq, isNull, asc, count } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { sprints, issues, projects } from '../../db/schema.js'
+import { sprints, issues, projects, categories } from '../../db/schema.js'
 import { AppError } from '../../utils/errors.js'
-import { emitGraphEvent } from '../../utils/graphEvents.js'
 import type {
   CreateSprintInput,
   UpdateSprintInput,
@@ -116,8 +115,6 @@ export const createSprint = async (
   if (!sprint) throw new AppError('SPRINT_CREATION_FAILED', 'Failed to create sprint', 500)
 
   const response = toSprintResponse(sprint)
-  // Keep the graph's Sprint node in step with this direct REST write.
-  emitGraphEvent('sprint', response)
   return response
 }
 
@@ -153,7 +150,6 @@ export const updateSprint = async (
   if (!updated) throw new AppError('SPRINT_UPDATE_FAILED', 'Failed to update sprint', 500)
 
   const response = toSprintResponse(updated)
-  emitGraphEvent('sprint', response)
   return response
 }
 
@@ -171,13 +167,13 @@ export const deleteSprint = async (projectId: string, sprintId: string): Promise
   if (!existing) throw new AppError('SPRINT_NOT_FOUND', 'Sprint not found', 404)
   if (existing.status === 'active') throw new AppError('SPRINT_ACTIVE', 'Complete the sprint before deleting it', 400)
 
-  // Move any issues in this sprint back to the backlog
-  await db
-    .update(issues)
-    .set({ sprintId: null })
-    .where(eq(issues.sprintId, sprintId))
-
-  await db.delete(sprints).where(eq(sprints.id, sprintId))
+  await db.transaction(async (tx) => {
+    // Unassign categories from this sprint
+    await tx.update(categories).set({ sprintId: null }).where(eq(categories.sprintId, sprintId))
+    // Move all sprint issues back to backlog
+    await tx.update(issues).set({ sprintId: null }).where(eq(issues.sprintId, sprintId))
+    await tx.delete(sprints).where(eq(sprints.id, sprintId))
+  })
 }
 
 // =============================================================================
@@ -216,34 +212,12 @@ export const startSprint = async (projectId: string, sprintId: string): Promise<
   if (!updated) throw new AppError('SPRINT_START_FAILED', 'Failed to start sprint', 500)
 
   const response = toSprintResponse(updated)
-  emitGraphEvent('sprint', response)
   return response
 }
 
 // =============================================================================
 // COMPLETE SPRINT
 // =============================================================================
-
-function formatSprintDate(date: Date): string {
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-// Returns the next date that falls on targetDay (0=Sun…6=Sat), starting from `from`.
-// If `from` is already that day it returns `from` unchanged (sprint ends on Monday → next starts Monday).
-function nextOccurrenceOfDay(from: Date, targetDay: number): Date {
-  const result = new Date(from)
-  const current = result.getDay()
-  const diff = (targetDay - current + 7) % 7
-  result.setDate(result.getDate() + diff)
-  return result
-}
-
-function buildSprintName(pattern: string | null, n: number, startDate: Date): string {
-  const template = pattern ?? 'Sprint {n}'
-  return template
-    .replace('{n}', String(n))
-    .replace('{date}', formatSprintDate(startDate))
-}
 
 export const completeSprint = async (
   projectId:      string,
@@ -266,6 +240,9 @@ export const completeSprint = async (
       .where(and(eq(issues.sprintId, sprintId), isNull(issues.completedAt), isNull(issues.deletedAt)))
   }
 
+  // Unassign all categories from this sprint so they're free for the next cycle
+  await db.update(categories).set({ sprintId: null }).where(eq(categories.sprintId, sprintId))
+
   const [updated] = await db
     .update(sprints)
     .set({ status: 'completed', endDate: existing.endDate ?? new Date() })
@@ -275,53 +252,32 @@ export const completeSprint = async (
   if (!updated) throw new AppError('SPRINT_COMPLETE_FAILED', 'Failed to complete sprint', 500)
 
   const completedSprint = toSprintResponse(updated)
-  emitGraphEvent('sprint', completedSprint)
 
-  // Check if the project has cadence auto-create enabled
   const [project] = await db
-    .select({
-      cadenceAutoCreate: projects.cadenceAutoCreate,
-      cadenceType:       projects.cadenceType,
-      cadenceStartDay:   projects.cadenceStartDay,
-      cadenceDuration:   projects.cadenceDuration,
-      cadenceNaming:     projects.cadenceNaming,
-      orgId:             projects.orgId,
-    })
+    .select({ weeklyAutoCreate: projects.weeklyAutoCreate, orgId: projects.orgId })
     .from(projects)
     .where(eq(projects.id, projectId))
     .limit(1)
 
-  if (!project?.cadenceAutoCreate || project.cadenceType === 'none') {
+  if (!project?.weeklyAutoCreate) {
     return { completedSprint, nextSprint: null }
   }
 
-  // Snap the start date to the configured start day.
-  // e.g. sprint ends Wednesday, cadenceStartDay = 1 (Monday) → next Monday.
-  // If the end date already falls on the right day it stays unchanged.
-  const completedEnd = updated.endDate ?? new Date()
-  const startDate    = project.cadenceStartDay !== null
-    ? nextOccurrenceOfDay(completedEnd, project.cadenceStartDay)
-    : completedEnd
-
-  const duration = project.cadenceDuration ?? 7
-  const endDate  = new Date(startDate)
-  endDate.setDate(endDate.getDate() + duration)
-
-  // Sprint number = total sprints in this project + 1
   const countResult = await db
     .select({ sprintCount: count() })
     .from(sprints)
     .where(eq(sprints.projectId, projectId))
 
   const nextNumber = (countResult[0]?.sprintCount ?? 0) + 1
-  const name       = buildSprintName(project.cadenceNaming, nextNumber, startDate)
+  const startDate  = new Date()
+  const endDate    = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)
 
   const [nextRow] = await db
     .insert(sprints)
     .values({
       projectId,
       orgId:     project.orgId,
-      name,
+      name:      `Sprint ${nextNumber}`,
       status:    'planned',
       startDate,
       endDate,
@@ -332,55 +288,5 @@ export const completeSprint = async (
   if (!nextRow) throw new AppError('SPRINT_AUTO_CREATE_FAILED', 'Failed to auto-create next sprint', 500)
 
   const nextSprint = toSprintResponse(nextRow)
-  emitGraphEvent('sprint', nextSprint)
   return { completedSprint, nextSprint }
-}
-
-// =============================================================================
-// ADD / REMOVE ISSUE
-// =============================================================================
-
-export const addIssueToSprint = async (
-  projectId: string,
-  sprintId:  string,
-  issueId:   string,
-): Promise<void> => {
-  const [sprint] = await db
-    .select({ status: sprints.status })
-    .from(sprints)
-    .where(and(eq(sprints.id, sprintId), eq(sprints.projectId, projectId)))
-    .limit(1)
-
-  if (!sprint) throw new AppError('SPRINT_NOT_FOUND', 'Sprint not found', 404)
-  if (sprint.status === 'completed') throw new AppError('SPRINT_COMPLETED', 'Cannot add issues to a completed sprint', 400)
-
-  const [issue] = await db
-    .select({ id: issues.id })
-    .from(issues)
-    .where(and(eq(issues.id, issueId), eq(issues.projectId, projectId), isNull(issues.deletedAt)))
-    .limit(1)
-
-  if (!issue) throw new AppError('ISSUE_NOT_FOUND', 'Issue not found', 404)
-
-  await db.update(issues).set({ sprintId }).where(eq(issues.id, issueId))
-}
-
-export const removeIssueFromSprint = async (
-  projectId: string,
-  sprintId:  string,
-  issueId:   string,
-): Promise<void> => {
-  const [sprint] = await db
-    .select({ status: sprints.status })
-    .from(sprints)
-    .where(and(eq(sprints.id, sprintId), eq(sprints.projectId, projectId)))
-    .limit(1)
-
-  if (!sprint) throw new AppError('SPRINT_NOT_FOUND', 'Sprint not found', 404)
-  if (sprint.status === 'completed') throw new AppError('SPRINT_COMPLETED', 'Cannot remove issues from a completed sprint', 400)
-
-  await db
-    .update(issues)
-    .set({ sprintId: null })
-    .where(and(eq(issues.id, issueId), eq(issues.sprintId, sprintId)))
 }

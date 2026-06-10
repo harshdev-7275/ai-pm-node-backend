@@ -8,6 +8,7 @@ import { authRoutes } from '../../auth/auth.routes.js'
 import { orgsRoutes } from '../../orgs/orgs.routes.js'
 import { projectsRoutes } from '../../projects/projects.routes.js'
 import { issuesRoutes } from '../issues.routes.js'
+import { categoriesRoutes } from '../../categories/categories.routes.js'
 import { env } from '../../../config/env.js'
 import { db } from '../../../db/index.js'
 import { issueStatuses } from '../../../db/schema.js'
@@ -38,6 +39,7 @@ const buildTestApp = async () => {
   await app.register(orgsRoutes,     { prefix: '/orgs' })
   await app.register(projectsRoutes, { prefix: '/orgs/:slug/projects' })
   await app.register(issuesRoutes,   { prefix: '/orgs/:slug/projects/:projectId/issues' })
+  await app.register(categoriesRoutes, { prefix: '/orgs/:slug/projects/:projectId/categories' })
 
   await app.ready()
   return app
@@ -92,19 +94,26 @@ describe('Issue History API', () => {
       .orderBy(issueStatuses.position)
     const defaultStatusId = statuses[0]!.id
 
+    // 4b — Create a category — categoryId is required on every issue
+    const categoryRes = await supertest(app.server)
+      .post(`/orgs/${orgSlug}/projects/${projectId}/categories`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ name: 'General' })
+    const categoryId = categoryRes.body.id
+
     // 5 — Create two issues:
     //     freshIssueId — never updated, used for the empty-history test
     //     issueId      — updated in subsequent tests to populate history
     const freshRes = await supertest(app.server)
       .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
       .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ title: 'Fresh issue — never updated', statusId: defaultStatusId })
+      .send({ title: 'Fresh issue — never updated', statusId: defaultStatusId, categoryId })
     freshIssueId = freshRes.body.id
 
     const issueRes = await supertest(app.server)
       .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
       .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ title: 'History test issue', statusId: defaultStatusId })
+      .send({ title: 'History test issue', statusId: defaultStatusId, categoryId })
     issueId = issueRes.body.id
 
     // 6 — Register outsider (never joins the org)

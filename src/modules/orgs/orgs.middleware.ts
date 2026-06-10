@@ -50,6 +50,4 @@ export async function requireOrgMember(
 
   req.org        = org
   req.membership = membership
-  req.isBot      = false
-  req.botUserId  = undefined
 }

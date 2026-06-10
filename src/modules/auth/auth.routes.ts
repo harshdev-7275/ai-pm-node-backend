@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { registerSchema, loginSchema } from './auth.schema.js'
 import * as authService from './auth.service.js'
 import { refreshCookieOptions, REFRESH_COOKIE_PATH } from './auth.cookies.js'
+import { AppError } from '../../utils/errors.js'
 import { env } from '../../config/env.js'
 
 const userResponseSchema = {
@@ -103,7 +104,7 @@ export const authRoutes = async (app: FastifyInstance) => {
         expiresIn:   result.tokens.expiresIn,
       })
     } catch (err: unknown) {
-      if (err instanceof Error && (err as any).code === 'EMAIL_TAKEN') {
+      if (err instanceof AppError && err.code === 'EMAIL_TAKEN') {
         return reply.status(409).send({
           error:   'EMAIL_TAKEN',
           message: 'An account with this email already exists',
@@ -152,7 +153,7 @@ export const authRoutes = async (app: FastifyInstance) => {
         expiresIn:   result.tokens.expiresIn,
       })
     } catch (err: unknown) {
-      if (err instanceof Error && (err as any).code === 'INVALID_CREDENTIALS') {
+      if (err instanceof AppError && err.code === 'INVALID_CREDENTIALS') {
         return reply.status(401).send({
           error:   'INVALID_CREDENTIALS',
           message: 'Invalid email or password',
@@ -194,10 +195,10 @@ export const authRoutes = async (app: FastifyInstance) => {
     } catch (err: unknown) {
       reply.clearCookie('refresh_token', { path: REFRESH_COOKIE_PATH })
 
-      if (err instanceof Error && (
-        (err as any).code === 'INVALID_REFRESH_TOKEN' ||
-        (err as any).code === 'REFRESH_TOKEN_REVOKED' ||
-        (err as any).code === 'REFRESH_TOKEN_EXPIRED'
+      if (err instanceof AppError && (
+        err.code === 'INVALID_REFRESH_TOKEN' ||
+        err.code === 'REFRESH_TOKEN_REVOKED' ||
+        err.code === 'REFRESH_TOKEN_EXPIRED'
       )) {
         return reply.status(401).send({
           error:   err.message,
@@ -228,7 +229,7 @@ export const authRoutes = async (app: FastifyInstance) => {
       const user = await authService.getMe(req.user.userId)
       return reply.status(200).send(user)
     } catch (err: unknown) {
-      if (err instanceof Error && (err as any).code === 'USER_NOT_FOUND') {
+      if (err instanceof AppError && err.code === 'USER_NOT_FOUND') {
         return reply.status(404).send({
           error:   'USER_NOT_FOUND',
           message: 'User not found',

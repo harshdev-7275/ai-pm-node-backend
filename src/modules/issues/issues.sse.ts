@@ -8,6 +8,7 @@ import type { IssueResponse } from './issues.types.js'
 export type BoardEvent =
   | { type: 'CONNECTED' }
   | { type: 'ISSUE_STATUS_UPDATED'; issueId: string; statusId: string; actorId: string; actorName: string }
+  | { type: 'ISSUE_UPDATED'; issue: IssueResponse; actorId: string; actorName: string }
   | { type: 'ISSUE_CREATED'; issue: IssueResponse; actorId: string; actorName: string }
 
 // =============================================================================

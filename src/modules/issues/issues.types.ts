@@ -37,6 +37,7 @@ export interface IssueResponse {
   title:          string
   description:    string | null
   type:           string
+  categoryId:     string
   priority:       string
   statusId:       string
   assigneeId:     string | null
@@ -57,14 +58,6 @@ export interface IssueDetail extends IssueResponse {
   status:   IssueStatus
   assignee: IssueUser | null
   reporter: IssueUser
-}
-
-// A list row with its status and assignee resolved to full objects (names, not
-// raw IDs). Lighter than IssueDetail — no reporter join — for list endpoints
-// that need human-readable assignee/status, e.g. the bot/AI issue list.
-export interface IssueListItem extends IssueResponse {
-  status:   IssueStatus
-  assignee: IssueUser | null
 }
 
 export interface CommentAuthor {

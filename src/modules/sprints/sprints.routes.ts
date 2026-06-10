@@ -97,7 +97,7 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
       },
     },
   }, async (req, reply) => {
-    const { projectId, slug } = req.params as { projectId: string; slug: string }
+    const { projectId } = req.params as { projectId: string; slug: string }
     const input = createSprintSchema.parse(req.body)
     const result = await sprintsService.createSprint(input, projectId, req.org.id, req.user.userId)
     return reply.status(201).send(result)
@@ -211,43 +211,4 @@ export async function sprintsRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(200).send(result)
   })
 
-  // POST /:sprintId/issues/:issueId — add issue to sprint
-  app.post('/:sprintId/issues/:issueId', {
-    onRequest:  [requireProjectAccess('member')],
-    schema: {
-      tags:     ['Sprints'],
-      summary:  'Add issue to sprint',
-      security: [{ bearerAuth: [] }],
-      response: {
-        204: { type: 'null' },
-        400: errorSchema,
-        403: errorSchema,
-        404: errorSchema,
-      },
-    },
-  }, async (req, reply) => {
-    const { projectId, sprintId, issueId } = req.params as { projectId: string; sprintId: string; issueId: string }
-    await sprintsService.addIssueToSprint(projectId, sprintId, issueId)
-    return reply.status(204).send()
-  })
-
-  // DELETE /:sprintId/issues/:issueId — remove issue from sprint (back to backlog)
-  app.delete('/:sprintId/issues/:issueId', {
-    onRequest:  [requireProjectAccess('member')],
-    schema: {
-      tags:     ['Sprints'],
-      summary:  'Remove issue from sprint',
-      security: [{ bearerAuth: [] }],
-      response: {
-        204: { type: 'null' },
-        400: errorSchema,
-        403: errorSchema,
-        404: errorSchema,
-      },
-    },
-  }, async (req, reply) => {
-    const { projectId, sprintId, issueId } = req.params as { projectId: string; sprintId: string; issueId: string }
-    await sprintsService.removeIssueFromSprint(projectId, sprintId, issueId)
-    return reply.status(204).send()
-  })
 }
