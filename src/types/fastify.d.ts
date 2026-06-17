@@ -25,5 +25,7 @@ declare module 'fastify' {
     membership:  Pick<typeof organizationMembers.$inferSelect, 'id' | 'role'>
     /** Effective project access level, set by the requireProjectAccess guard. */
     projectRole: (typeof projectMembers.$inferSelect)['role']
+    /** True when the request is authenticated via the static AI_SERVICE_TOKEN. */
+    isServiceRequest: boolean
   }
 }
