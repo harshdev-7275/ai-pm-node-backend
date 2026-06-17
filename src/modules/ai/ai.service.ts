@@ -31,6 +31,7 @@ export const sendChatMessage = async (
       body: JSON.stringify({
         message: input.message,
         ...(input.projectId ? { project_id: input.projectId } : {}),
+        ...(input.history && input.history.length ? { history: input.history } : {}),
       }),
     })
   } catch {

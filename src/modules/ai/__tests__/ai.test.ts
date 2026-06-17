@@ -127,6 +127,32 @@ describe('AI proxy API', () => {
     expect(body.project_id).toBe('11111111-1111-4111-8111-111111111111')
   })
 
+  it('forwards conversation history to ai-service', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(AI_RESPONSE), {
+        status:  200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const history = [
+      { role: 'user',      content: 'give me all issues' },
+      { role: 'assistant', content: 'Which project? TP or NP' },
+    ]
+
+    const res = await supertest(app.server)
+      .post('/ai/chat')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ message: 'From TP', history })
+
+    expect(res.status).toBe(200)
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    expect(body.message).toBe('From TP')
+    expect(body.history).toEqual(history)
+  })
+
   it('never forwards a client-supplied Authorization or service token', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(AI_RESPONSE), { status: 200 }),

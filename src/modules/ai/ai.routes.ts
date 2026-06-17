@@ -9,6 +9,18 @@ const chatRequestJsonSchema = {
   properties: {
     message:   { type: 'string', minLength: 1, maxLength: 4000 },
     projectId: { type: 'string', format: 'uuid' },
+    history: {
+      type: 'array' as const,
+      maxItems: 50,
+      items: {
+        type: 'object' as const,
+        properties: {
+          role:    { type: 'string', enum: ['user', 'assistant'] },
+          content: { type: 'string', minLength: 1, maxLength: 8000 },
+        },
+        required: ['role', 'content'],
+      },
+    },
   },
   required: ['message'],
 }
