@@ -7,6 +7,24 @@ export async function requireOrgMember(
   req: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  const { slug } = req.params as { slug: string }
+
+  // Service-token requests bypass JWT verification and membership checks.
+  if (req.isServiceRequest) {
+    const [org] = await db
+      .select()
+      .from(organizations)
+      .where(eq(organizations.slug, slug))
+      .limit(1)
+    if (!org) {
+      reply.status(404).send({ error: 'ORG_NOT_FOUND', message: 'Organization not found' })
+      return
+    }
+    req.org        = org
+    req.membership = { id: 'service', role: 'owner' }
+    return
+  }
+
   // Step 1 — verify JWT (reuses the same jwtVerify the authenticate decorator calls)
   try {
     await req.jwtVerify()
@@ -16,8 +34,6 @@ export async function requireOrgMember(
   }
 
   // Step 2 — find org by :slug param
-  const { slug } = req.params as { slug: string }
-
   const [org] = await db
     .select()
     .from(organizations)

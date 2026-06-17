@@ -19,6 +19,23 @@ export function requireProjectAccess(minRole: AccessLevel) {
   return async function projectAccessGuard(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const { slug, projectId } = req.params as { slug: string; projectId: string }
 
+    // Service-token requests bypass JWT verification and access checks.
+    if (req.isServiceRequest) {
+      const org = await loadOrg(slug)
+      if (!org) {
+        reply.status(404).send({ error: 'ORG_NOT_FOUND', message: 'Organization not found' })
+        return
+      }
+      if (!(await projectBelongsToOrg(projectId, org.id))) {
+        reply.status(404).send({ error: 'PROJECT_NOT_FOUND', message: 'Project not found' })
+        return
+      }
+      req.org         = org
+      req.membership  = { id: 'service', role: 'owner' }
+      req.projectRole = 'lead'
+      return
+    }
+
     try {
       await req.jwtVerify()
     } catch {

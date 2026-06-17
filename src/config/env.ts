@@ -11,6 +11,9 @@ const EnvSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'), // comma-separated for multiple origins
   API_URL: z.string().default('https://api.example.com'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  // Static shared secret for service-to-service auth (ai-service → node-backend).
+  // If unset, service-token auth is disabled and all requests must carry a user JWT.
+  AI_SERVICE_TOKEN: z.string().min(32).optional(),
 })
 
 const parsed = EnvSchema.safeParse(process.env)

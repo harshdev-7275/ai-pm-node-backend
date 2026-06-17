@@ -9,6 +9,7 @@ import swagger from '@fastify/swagger'
 import swaggerUI from '@fastify/swagger-ui'
 import { env } from './config/env.js'
 import { handleError } from './middleware/errorHandler.js'
+import { markServiceRequest } from './middleware/authenticateService.js'
 import { authRoutes } from './modules/auth/auth.routes.js'
 import { orgsRoutes } from './modules/orgs/orgs.routes.js'
 import { projectsRoutes } from './modules/projects/projects.routes.js'
@@ -40,6 +41,10 @@ export async function buildApp() {
   })
   await app.register(jwt, { secret: env.JWT_SECRET })
   await app.register(cookie, { secret: env.JWT_SECRET })
+
+  // Must run before any preHandler so req.isServiceRequest is set when
+  // requireOrgMember / requireProjectAccess inspect it.
+  app.addHook('onRequest', markServiceRequest)
 
   await app.register(swagger, {
     openapi: {

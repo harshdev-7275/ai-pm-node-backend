@@ -1,8 +1,8 @@
 import bcrypt from 'bcryptjs'
 import jwt, { type SignOptions } from 'jsonwebtoken'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { users, userAuth, refreshTokens } from '../../db/schema.js'
+import { users, userAuth, refreshTokens, organizationMembers, organizations } from '../../db/schema.js'
 import { env } from '../../config/env.js'
 import { AppError } from '../../utils/errors.js'
 import type { RegisterInput, LoginInput, AuthTokens, AuthResponse, TokenPayload } from './auth.types.js'
@@ -172,11 +172,24 @@ export const createSession = async (
 
   if (!session) throw new AppError('SESSION_CREATION_FAILED', 'Session creation failed', 500)
 
-  // 3. Generate access token
+  // 3. Resolve first active org for this user (embedded in JWT for multi-service routing)
+  const [orgRow] = await db
+    .select({ id: organizations.id, slug: organizations.slug })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
+    .where(and(
+      eq(organizationMembers.userId, userId),
+      eq(organizationMembers.isActive, true),
+    ))
+    .limit(1)
+
+  // 4. Generate access token
   const payload: TokenPayload = {
     userId,
     email,
     sessionId: session.id,
+    orgId:     orgRow?.id   ?? '',
+    orgSlug:   orgRow?.slug ?? '',
   }
 
   const accessToken = generateAccessToken(payload)
@@ -230,11 +243,24 @@ export const refreshAccessToken = async (
     throw new AppError('USER_NOT_FOUND', 'User not found', 404)
   }
 
-  // 5. Issue new access token
+  // 5. Resolve org for the refreshed token
+  const [orgRow] = await db
+    .select({ id: organizations.id, slug: organizations.slug })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizationMembers.orgId, organizations.id))
+    .where(and(
+      eq(organizationMembers.userId, user.id),
+      eq(organizationMembers.isActive, true),
+    ))
+    .limit(1)
+
+  // 6. Issue new access token
   const payload: TokenPayload = {
     userId:    user.id,
     email:     user.email,
     sessionId: session.id,
+    orgId:     orgRow?.id   ?? '',
+    orgSlug:   orgRow?.slug ?? '',
   }
 
   const accessToken = generateAccessToken(payload)

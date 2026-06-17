@@ -15,6 +15,8 @@ export interface TokenPayload {
   userId:    string
   email:     string
   sessionId: string  // refresh token ID — used to invalidate specific sessions
+  orgId:     string  // first active org at login time (empty string if none)
+  orgSlug:   string  // human-readable org slug for routing
 }
 
 export interface AuthTokens {
