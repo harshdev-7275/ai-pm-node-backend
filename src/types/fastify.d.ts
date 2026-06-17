@@ -12,6 +12,10 @@ export interface AuthUser {
   userId:    string
   email?:    string
   sessionId?: string
+  /** First active org at login time. Empty string if the user has no org. */
+  orgId?:    string
+  /** Human-readable slug of that org. Empty string if the user has no org. */
+  orgSlug?:  string
 }
 
 declare module 'fastify' {

@@ -18,6 +18,7 @@ import { commentsRoutes } from './modules/issues/comments.routes.js'
 import { statusesRoutes } from './modules/issues/statuses.routes.js'
 import { sprintsRoutes } from './modules/sprints/sprints.routes.js'
 import { categoriesRoutes } from './modules/categories/categories.routes.js'
+import { aiRoutes } from './modules/ai/ai.routes.js'
 
 export async function buildApp() {
   const app = Fastify({
@@ -113,6 +114,7 @@ export async function buildApp() {
   await app.register(sprintsRoutes,    { prefix: '/orgs/:slug/projects/:projectId/sprints' })
   await app.register(categoriesRoutes, { prefix: '/orgs/:slug/projects/:projectId/categories' })
   await app.register(projectsRoutes,   { prefix: '/orgs/:slug/projects' })
+  await app.register(aiRoutes)
 
   app.get('/health', {
     schema: {

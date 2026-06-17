@@ -24,6 +24,9 @@ export type ErrorCode =
   | 'USER_NOT_FOUND'
   | 'ISSUE_NOT_FOUND'
   | 'SPRINT_AUTO_CREATE_FAILED'
+  | 'AI_NOT_CONFIGURED'
+  | 'AI_UNREACHABLE'
+  | 'AI_REQUEST_FAILED'
 
 export class AppError extends Error {
   constructor(

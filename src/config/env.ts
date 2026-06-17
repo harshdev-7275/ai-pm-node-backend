@@ -14,6 +14,8 @@ const EnvSchema = z.object({
   // Static shared secret for service-to-service auth (ai-service → node-backend).
   // If unset, service-token auth is disabled and all requests must carry a user JWT.
   AI_SERVICE_TOKEN: z.string().min(32).optional(),
+  // Base URL of the (private) ai-service the BFF proxies chat requests to.
+  AI_SERVICE_URL: z.string().url().default('http://localhost:8000'),
 })
 
 const parsed = EnvSchema.safeParse(process.env)
