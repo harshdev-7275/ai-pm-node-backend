@@ -34,6 +34,17 @@ export interface ProjectResponse {
   weeklyAutoCreate: boolean
 }
 
+export interface ProjectStats {
+  todo:       number
+  inProgress: number
+  done:       number
+  total:      number
+}
+
+export interface ProjectWithStats extends ProjectResponse {
+  stats: ProjectStats
+}
+
 export interface ProjectDetail extends ProjectResponse {
   members: ProjectMember[]
 }

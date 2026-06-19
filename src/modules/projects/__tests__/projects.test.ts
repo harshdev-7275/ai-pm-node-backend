@@ -7,6 +7,8 @@ import cookie from '@fastify/cookie'
 import { authRoutes } from '../../auth/auth.routes.js'
 import { orgsRoutes } from '../../orgs/orgs.routes.js'
 import { projectsRoutes } from '../projects.routes.js'
+import { issuesRoutes } from '../../issues/issues.routes.js'
+import { categoriesRoutes } from '../../categories/categories.routes.js'
 import { env } from '../../../config/env.js'
 import { db } from '../../../db/index.js'
 import { issueStatuses } from '../../../db/schema.js'
@@ -36,6 +38,8 @@ const buildTestApp = async () => {
   await app.register(authRoutes)
   await app.register(orgsRoutes, { prefix: '/orgs' })
   await app.register(projectsRoutes, { prefix: '/orgs/:slug/projects' })
+  await app.register(issuesRoutes, { prefix: '/orgs/:slug/projects/:projectId/issues' })
+  await app.register(categoriesRoutes, { prefix: '/orgs/:slug/projects/:projectId/categories' })
 
   await app.ready()
   return app
@@ -423,6 +427,83 @@ describe('Projects API', () => {
       expect(res.status).toBe(200)
       expect(res.body.some((p: { id: string }) => p.id === projectId)).toBe(true)
       expect(res.body.some((p: { id: string }) => p.id === filteredProjectId)).toBe(true)
+    })
+  })
+
+  // ===========================================================================
+  describe('GET /orgs/:slug/projects — stats', () => {
+
+    it('should return stats with todo, inProgress, done, and total counts', async () => {
+      // Fetch statuses for the main project
+      const statusesRes = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects/${projectId}/issues/statuses`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+      const todoStatus = statusesRes.body.find((s: { category: string }) => s.category === 'todo')
+      const inProgressStatus = statusesRes.body.find((s: { category: string }) => s.category === 'in_progress')
+      const doneStatus = statusesRes.body.find((s: { category: string }) => s.category === 'done')
+
+      // Fetch categories for the main project
+      const catsRes = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects/${projectId}/categories`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+      let categoryId = catsRes.body[0]?.id
+
+      // Create a category if none exist
+      if (!categoryId) {
+        const catRes = await supertest(app.server)
+          .post(`/orgs/${orgSlug}/projects/${projectId}/categories`)
+          .set('Authorization', `Bearer ${ownerToken}`)
+          .send({ name: 'General', color: '#6366f1' })
+        categoryId = catRes.body.id
+      }
+
+      // Create 2 todo issues, 1 in_progress, 1 done
+      await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Todo 1', categoryId, statusId: todoStatus.id })
+      await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Todo 2', categoryId, statusId: todoStatus.id })
+      await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Active 1', categoryId, statusId: inProgressStatus.id })
+      await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects/${projectId}/issues`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ title: 'Done 1', categoryId, statusId: doneStatus.id })
+
+      // Now list projects and verify stats
+      const res = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+
+      expect(res.status).toBe(200)
+      const project = res.body.find((p: { id: string }) => p.id === projectId)
+      expect(project).toBeDefined()
+      expect(project.stats).toBeDefined()
+      expect(project.stats.todo).toBe(2)
+      expect(project.stats.inProgress).toBe(1)
+      expect(project.stats.done).toBe(1)
+      expect(project.stats.total).toBe(4)
+    })
+
+    it('should return zero stats for a project with no issues', async () => {
+      // Create a fresh project with no issues
+      const createRes = await supertest(app.server)
+        .post(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ name: 'Empty Stats Project', key: `EST${ts.toString().slice(-4)}` })
+
+      const res = await supertest(app.server)
+        .get(`/orgs/${orgSlug}/projects`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+
+      const project = res.body.find((p: { id: string }) => p.id === createRes.body.id)
+      expect(project).toBeDefined()
+      expect(project.stats).toEqual({ todo: 0, inProgress: 0, done: 0, total: 0 })
     })
   })
 })

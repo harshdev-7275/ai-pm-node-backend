@@ -1,13 +1,15 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../../db/index.js'
-import { projects, projectMembers, issueStatuses, users } from '../../db/schema.js'
+import { projects, projectMembers, issueStatuses, issues, users } from '../../db/schema.js'
 import type {
   CreateProjectInput,
   UpdateProjectInput,
   AddProjectMemberInput,
   ProjectResponse,
+  ProjectWithStats,
   ProjectDetail,
   ProjectMember,
+  ProjectStats,
 } from './projects.types.js'
 
 // =============================================================================
@@ -109,36 +111,81 @@ export const getOrgProjects = async (
   orgId:    string,
   userId:   string,
   userRole: string,
-): Promise<ProjectResponse[]> => {
-  // Owners and admins see every active project in the org
+): Promise<ProjectWithStats[]> => {
+  let projectRows: (typeof projects.$inferSelect)[]
+
   if (userRole === 'owner' || userRole === 'admin') {
-    const rows = await db
+    projectRows = await db
       .select()
       .from(projects)
       .where(and(
         eq(projects.orgId, orgId),
         eq(projects.isArchived, false),
       ))
-    return rows.map(toResponse)
+  } else {
+    const rows = await db
+      .select({ project: projects })
+      .from(projects)
+      .innerJoin(
+        projectMembers,
+        and(
+          eq(projectMembers.projectId, projects.id),
+          eq(projectMembers.userId, userId),
+        ),
+      )
+      .where(and(
+        eq(projects.orgId, orgId),
+        eq(projects.isArchived, false),
+      ))
+    projectRows = rows.map(r => r.project)
   }
 
-  // Members and viewers only see projects they have been explicitly added to
-  const rows = await db
-    .select({ project: projects })
-    .from(projects)
-    .innerJoin(
-      projectMembers,
-      and(
-        eq(projectMembers.projectId, projects.id),
-        eq(projectMembers.userId, userId),
-      ),
-    )
-    .where(and(
-      eq(projects.orgId, orgId),
-      eq(projects.isArchived, false),
-    ))
+  if (projectRows.length === 0) return []
 
-  return rows.map(r => toResponse(r.project))
+  const statsMap = await getProjectStatsMap(projectRows.map(p => p.id))
+
+  return projectRows.map(p => ({
+    ...toResponse(p),
+    stats: statsMap.get(p.id) ?? { todo: 0, inProgress: 0, done: 0, total: 0 },
+  }))
+}
+
+// =============================================================================
+// PROJECT STATS — aggregated issue counts by status category
+// =============================================================================
+
+const getProjectStatsMap = async (
+  projectIds: string[],
+): Promise<Map<string, ProjectStats>> => {
+  const rows = await db
+    .select({
+      projectId: issues.projectId,
+      category:  issueStatuses.category,
+      count:     sql<number>`count(*)::int`,
+    })
+    .from(issues)
+    .innerJoin(issueStatuses, eq(issues.statusId, issueStatuses.id))
+    .where(inArray(issues.projectId, projectIds))
+    .groupBy(issues.projectId, issueStatuses.category)
+
+  const map = new Map<string, ProjectStats>()
+
+  for (const row of rows) {
+    let stats = map.get(row.projectId)
+    if (!stats) {
+      stats = { todo: 0, inProgress: 0, done: 0, total: 0 }
+      map.set(row.projectId, stats)
+    }
+
+    const count = row.count
+    stats.total += count
+
+    if (row.category === 'todo')        stats.todo       += count
+    else if (row.category === 'in_progress') stats.inProgress += count
+    else if (row.category === 'done')   stats.done       += count
+  }
+
+  return map
 }
 
 // =============================================================================

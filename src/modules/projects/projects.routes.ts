@@ -36,6 +36,16 @@ const projectMemberSchema = {
   },
 }
 
+const projectStatsSchema = {
+  type: 'object' as const,
+  properties: {
+    todo:       { type: 'number' },
+    inProgress: { type: 'number' },
+    done:       { type: 'number' },
+    total:      { type: 'number' },
+  },
+}
+
 const projectResponseSchema = {
   type: 'object' as const,
   properties: {
@@ -50,6 +60,14 @@ const projectResponseSchema = {
     createdBy:        { type: 'string' },
     createdAt:        { type: 'string', format: 'date-time' },
     weeklyAutoCreate: { type: 'boolean' },
+  },
+}
+
+const projectWithStatsSchema = {
+  type: 'object' as const,
+  properties: {
+    ...projectResponseSchema.properties,
+    stats: projectStatsSchema,
   },
 }
 
@@ -131,7 +149,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
       tags:        ['Projects'],
       security:    [{ bearerAuth: [] }],
       response: {
-        200: { type: 'array' as const, items: projectResponseSchema },
+        200: { type: 'array' as const, items: projectWithStatsSchema },
       },
     },
   }, async (req, reply) => {
