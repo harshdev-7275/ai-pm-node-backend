@@ -1,6 +1,7 @@
 import { env } from '../../config/env.js'
 import { AppError } from '../../utils/errors.js'
 import type { ChatRequest, ChatIdentity, ChatResponse } from './ai.types.js'
+import { logger } from '../../utils/logger.js'
 
 /**
  * Proxy a chat request to ai-service over the trusted server-to-server channel.
@@ -43,4 +44,27 @@ export const sendChatMessage = async (
   }
 
   return (await res.json()) as ChatResponse
+}
+
+/**
+ * Fire-and-forget: trigger a full org graph sync on the ai-service.
+ *
+ * Called after project creation so the knowledge graph is populated
+ * immediately. Failures are logged but never bubble up — the caller's
+ * response must not be delayed or broken by ai-service availability.
+ */
+export const triggerGraphSync = (orgId: string, orgSlug: string): void => {
+  if (!env.AI_SERVICE_TOKEN) return
+
+  const url = `${env.AI_SERVICE_URL}/v1/graph/sync`
+  fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type':    'application/json',
+      'X-Service-Token': env.AI_SERVICE_TOKEN,
+    },
+    body: JSON.stringify({ org_id: orgId, org_slug: orgSlug }),
+  }).catch((err: unknown) => {
+    logger.warn({ err, url }, 'graph sync trigger failed (fire-and-forget)')
+  })
 }

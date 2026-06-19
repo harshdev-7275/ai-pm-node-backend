@@ -10,6 +10,7 @@ import { requireOrgMember } from '../orgs/orgs.middleware.js'
 import { requireProjectAccess } from '../../middleware/requireProjectAccess.js'
 import { canCreateProject } from '../../utils/permissions.js'
 import * as projectsService from './projects.service.js'
+import { triggerGraphSync } from '../ai/ai.service.js'
 
 // =============================================================================
 // RESPONSE SCHEMAS
@@ -127,6 +128,7 @@ export const projectsRoutes = async (app: FastifyInstance) => {
 
     try {
       const project = await projectsService.createProject(parsed.data, req.org.id, req.user.userId)
+      triggerGraphSync(req.org.id, req.org.slug)
       return reply.status(201).send(project)
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'KEY_TAKEN') {
