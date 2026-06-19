@@ -1024,3 +1024,62 @@ export const customFieldValues = pgTable('custom_field_values', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdateFn(() => new Date()),
 })
 
+
+// =============================================================================
+// KNOWLEDGE GRAPH SYNC
+// Observability for the event-driven sync that mirrors Postgres data into the
+// ai-service knowledge graph (Neo4j). One row per sync attempt — lets us debug
+// "why is the AI suggestion stale/wrong?" and detect dropped or failing events.
+// =============================================================================
+
+/**
+ * What kind of graph sync was triggered.
+ * - incremental: re-syncs a single project's issues (+ comments + history).
+ *                Fired by high-frequency issue mutations.
+ * - full:        re-syncs the whole org. Fired by structural changes the
+ *                incremental sync skips (sprints, members, statuses, categories).
+ */
+export const kgSyncKindEnum = pgEnum('kg_sync_kind', ['incremental', 'full'])
+
+/**
+ * Lifecycle state of a sync attempt.
+ * - pending: row inserted, ai-service request in flight.
+ * - success: ai-service acknowledged the resync.
+ * - error:   ai-service was unreachable or returned a non-2xx response.
+ */
+export const kgSyncStatusEnum = pgEnum('kg_sync_status', ['pending', 'success', 'error'])
+
+/**
+ * kg_sync_log
+ * Audit trail of knowledge-graph sync attempts. Written fire-and-forget from the
+ * BFF after a mutating request — never blocks the user's response. Failures here
+ * are swallowed-and-logged; the app keeps working even if the graph drifts.
+ */
+export const kgSyncLog = pgTable('kg_sync_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  /** Which org this sync was for — always set */
+  orgId: uuid('org_id').notNull().references(() => organizations.id),
+
+  /**
+   * Which project was incrementally synced.
+   * null = a full org sync (not scoped to one project).
+   */
+  projectId: uuid('project_id').references(() => projects.id),
+
+  /** incremental (single project) or full (whole org) */
+  kind: kgSyncKindEnum('kind').notNull(),
+
+  /** pending → success | error */
+  status: kgSyncStatusEnum('status').default('pending').notNull(),
+
+  /** When the sync request was kicked off */
+  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+
+  /** When the sync resolved (success or error). null while pending. */
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+
+  /** Short failure reason when status = error. null otherwise. Never contains PII. */
+  error: varchar('error', { length: 1000 }),
+})
+

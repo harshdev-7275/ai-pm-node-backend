@@ -43,6 +43,13 @@
       "when": 1781120977878,
       "tag": "0005_striped_vargas",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781884418242,
+      "tag": "0006_bizarre_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

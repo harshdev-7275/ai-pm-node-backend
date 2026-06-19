@@ -19,6 +19,13 @@ import { statusesRoutes } from './modules/issues/statuses.routes.js'
 import { sprintsRoutes } from './modules/sprints/sprints.routes.js'
 import { categoriesRoutes } from './modules/categories/categories.routes.js'
 import { aiRoutes } from './modules/ai/ai.routes.js'
+import { createGraphSyncHook } from './modules/ai/graphSync.hook.js'
+import { triggerGraphSync, triggerProjectGraphSync } from './modules/ai/ai.service.js'
+import { debounceByKey } from './utils/debounceByKey.js'
+
+// Coalesce graph-sync bursts (e.g. dragging several cards) into one resync per
+// project/org. Trailing-edge: fires ~this long after the last mutation settles.
+const GRAPH_SYNC_DEBOUNCE_MS = 2500
 
 export async function buildApp() {
   const app = Fastify({
@@ -46,6 +53,16 @@ export async function buildApp() {
   // Must run before any preHandler so req.isServiceRequest is set when
   // requireOrgMember / requireProjectAccess inspect it.
   app.addHook('onRequest', markServiceRequest)
+
+  // Keep the ai-service knowledge graph fresh: after any successful mutation of
+  // project-scoped data, schedule a (debounced) graph sync. Fire-and-forget —
+  // never blocks or fails the user's response. See graphSync.hook.ts.
+  const debouncedProjectSync = debounceByKey(triggerProjectGraphSync, GRAPH_SYNC_DEBOUNCE_MS)
+  const debouncedOrgSync     = debounceByKey(triggerGraphSync, GRAPH_SYNC_DEBOUNCE_MS)
+  app.addHook('onResponse', createGraphSyncHook({
+    syncProject: (orgId, orgSlug, projectId) => debouncedProjectSync(projectId, orgId, orgSlug, projectId),
+    syncOrg:     (orgId, orgSlug)            => debouncedOrgSync(orgId, orgId, orgSlug),
+  }))
 
   await app.register(swagger, {
     openapi: {
