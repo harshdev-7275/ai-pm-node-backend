@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { chatRequestSchema } from './ai.schema.js'
+import { chatRequestSchema, suggestionRequestSchema } from './ai.schema.js'
 import * as aiService from './ai.service.js'
 import { AppError } from '../../utils/errors.js'
 import { env } from '../../config/env.js'
@@ -50,6 +50,32 @@ const errorSchema = {
   properties: {
     error:   { type: 'string' },
     message: { type: 'string' },
+  },
+}
+
+const suggestionRequestJsonSchema = {
+  type: 'object' as const,
+  properties: {
+    page:      { type: 'string', enum: ['board', 'backlog', 'members', 'analytics', 'dashboard', 'chat'] },
+    projectId: { type: 'string', format: 'uuid' },
+  },
+  required: ['page'],
+}
+
+const suggestionSchema = {
+  type: 'object' as const,
+  properties: {
+    id:        { type: 'string' },
+    label:     { type: 'string' },
+    prompt:    { type: 'string' },
+    projectId: { type: 'string' },
+  },
+}
+
+const suggestionsResponseSchema = {
+  type: 'object' as const,
+  properties: {
+    suggestions: { type: 'array', items: suggestionSchema },
   },
 }
 
@@ -152,6 +178,40 @@ export const aiRoutes = async (app: FastifyInstance) => {
       }
       throw err
     }
+  })
+
+  // POST /ai/suggestions — contextual prompt chips for the current page
+  app.post('/ai/suggestions', {
+    preHandler: [app.authenticate],
+    validatorCompiler: () => () => true,
+    schema: {
+      summary: 'Get contextual AI prompt suggestions',
+      description: 'Returns 4 prompt chips tailored to the current page and optional project.',
+      tags: ['AI'],
+      security: [{ bearerAuth: [] }],
+      body: suggestionRequestJsonSchema,
+      response: {
+        200: suggestionsResponseSchema,
+        400: errorSchema,
+        401: errorSchema,
+      },
+    },
+  }, async (req, reply) => {
+    const { userId, orgId, orgSlug } = (req as { user?: { userId?: string; orgId?: string; orgSlug?: string } }).user ?? {}
+    if (!userId || !orgId || !orgSlug) {
+      return reply.status(401).send({ error: 'NO_ACTIVE_ORG', message: 'No active organization for this user' })
+    }
+
+    const parsed = suggestionRequestSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'VALIDATION_ERROR',
+        issues: parsed.error.issues.map((e: z.core.$ZodIssue) => ({ field: e.path.join('.'), message: e.message })),
+      })
+    }
+
+    const result = await aiService.getAiSuggestions(parsed.data, orgId)
+    return reply.status(200).send(result)
   })
 
   // POST /ai/chat/stream — BFF SSE proxy to ai-service (protected by user JWT).

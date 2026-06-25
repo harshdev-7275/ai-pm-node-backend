@@ -1,7 +1,20 @@
 import type { z } from 'zod'
-import type { chatRequestSchema } from './ai.schema.js'
+import type { chatRequestSchema, suggestionRequestSchema } from './ai.schema.js'
 
 export type ChatRequest = z.infer<typeof chatRequestSchema>
+export type SuggestionRequest = z.infer<typeof suggestionRequestSchema>
+
+/** A single prompt suggestion returned to the client. */
+export interface Suggestion {
+  id:        string
+  label:     string   // short chip label shown in the UI
+  prompt:    string   // full question text sent to the AI
+  projectId?: string  // pre-scopes the chat turn when set
+}
+
+export interface SuggestionsResponse {
+  suggestions: Suggestion[]
+}
 
 /** Verified caller identity, taken from the JWT — never from client headers. */
 export interface ChatIdentity {
