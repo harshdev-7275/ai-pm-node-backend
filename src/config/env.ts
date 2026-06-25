@@ -16,6 +16,13 @@ const EnvSchema = z.object({
   AI_SERVICE_TOKEN: z.string().min(32).optional(),
   // Base URL of the (private) ai-service the BFF proxies chat requests to.
   AI_SERVICE_URL: z.string().url().default('http://localhost:8000'),
+  // Cloudflare R2 (S3-compatible) object storage for user-uploaded avatars.
+  // All four must be set for avatar uploads to work; if any is missing the
+  // upload endpoints respond with STORAGE_NOT_CONFIGURED.
+  R2_ACCOUNT_ID:        z.string().min(1).optional(),
+  R2_ACCESS_KEY_ID:     z.string().min(1).optional(),
+  R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  R2_BUCKET:            z.string().min(1).optional(),
 })
 
 const parsed = EnvSchema.safeParse(process.env)

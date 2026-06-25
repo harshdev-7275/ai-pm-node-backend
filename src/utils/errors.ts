@@ -27,6 +27,8 @@ export type ErrorCode =
   | 'AI_NOT_CONFIGURED'
   | 'AI_UNREACHABLE'
   | 'AI_REQUEST_FAILED'
+  | 'STORAGE_NOT_CONFIGURED'
+  | 'INVALID_FILE_TYPE'
 
 export class AppError extends Error {
   constructor(

@@ -11,6 +11,7 @@ import { env } from './config/env.js'
 import { handleError } from './middleware/errorHandler.js'
 import { markServiceRequest } from './middleware/authenticateService.js'
 import { authRoutes } from './modules/auth/auth.routes.js'
+import { usersRoutes } from './modules/users/users.routes.js'
 import { orgsRoutes } from './modules/orgs/orgs.routes.js'
 import { projectsRoutes } from './modules/projects/projects.routes.js'
 import { issuesRoutes } from './modules/issues/issues.routes.js'
@@ -123,6 +124,8 @@ export async function buildApp() {
     })
     await authApp.register(authRoutes)
   })
+
+  await app.register(usersRoutes)
 
   await app.register(orgsRoutes, { prefix: '/orgs' })
   await app.register(issuesRoutes,   { prefix: '/orgs/:slug/projects/:projectId/issues' })

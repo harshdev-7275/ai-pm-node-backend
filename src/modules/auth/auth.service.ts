@@ -5,6 +5,7 @@ import { db } from '../../db/index.js'
 import { users, userAuth, refreshTokens, organizationMembers, organizations } from '../../db/schema.js'
 import { env } from '../../config/env.js'
 import { AppError } from '../../utils/errors.js'
+import { signAvatarUrl } from '../../lib/r2.js'
 import type { RegisterInput, LoginInput, AuthTokens, AuthResponse, TokenPayload } from './auth.types.js'
 import crypto from 'crypto'
 
@@ -80,7 +81,7 @@ export const register = async (input: RegisterInput): Promise<AuthResponse> => {
       id:        newUser.id,
       name:      newUser.name,
       email:     newUser.email,
-      avatarUrl: newUser.avatarUrl ?? null,
+      avatarUrl: await signAvatarUrl(newUser.avatarUrl),
       jobTitle:  newUser.jobTitle ?? null,
       timezone:  newUser.timezone,
       createdAt: newUser.createdAt.toISOString(),
@@ -138,7 +139,7 @@ export const login = async (input: LoginInput): Promise<AuthResponse> => {
       id:        user.id,
       name:      user.name,
       email:     user.email,
-      avatarUrl: user.avatarUrl ?? null,
+      avatarUrl: await signAvatarUrl(user.avatarUrl),
       jobTitle:  user.jobTitle ?? null,
       timezone:  user.timezone,
       createdAt: user.createdAt.toISOString(),
@@ -287,7 +288,7 @@ export const getMe = async (userId: string) => {
     id:        user.id,
     name:      user.name,
     email:     user.email,
-    avatarUrl: user.avatarUrl ?? null,
+    avatarUrl: await signAvatarUrl(user.avatarUrl),
     jobTitle:  user.jobTitle ?? null,
     timezone:  user.timezone,
     createdAt: user.createdAt,
